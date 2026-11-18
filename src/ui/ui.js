@@ -536,6 +536,22 @@ async function connect() {
     try {
         state = await host.load();
         $("app-version").textContent = APP_VERSION;
+        if (host.capabilities.canToggleTheme) {
+            const themeToggle = $("theme-toggle");
+            themeToggle.hidden = false;
+            const applyTheme = (theme) => {
+                document.documentElement.dataset.theme = theme;
+                themeToggle.setAttribute("aria-pressed", String(theme === "dark"));
+                themeToggle.textContent = `Switch to ${theme === "dark" ? "light" : "dark"} theme`;
+            };
+            applyTheme(host.getTheme());
+            themeToggle.addEventListener("click", () => {
+                const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+                host.setTheme(next);
+                applyTheme(next);
+            });
+            host.subscribeTheme(applyTheme);
+        }
         $("export-btn").hidden = !host.capabilities.canImportExport;
         $("import-btn").hidden = !host.capabilities.canImportExport;
         if (host.capabilities.canCopyBriefing) {

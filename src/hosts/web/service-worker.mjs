@@ -8,6 +8,7 @@ const ASSETS = [
     "./ui.js",
     "./host.mjs",
     "./storage.mjs",
+    "./theme.mjs",
     "./engine.mjs",
     "./presets.mjs",
     "./interpretation.mjs",

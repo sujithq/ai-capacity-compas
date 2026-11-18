@@ -43,16 +43,18 @@ export async function buildWeb() {
     await rm(output, { recursive: true, force: true });
     await copyFiles([
         ["src/ui/ui.css"], ["src/ui/ui.js"], ["src/ui/favicon.svg"],
-        ["src/hosts/web/host.mjs"], ["src/hosts/web/storage.mjs"],
+        ["src/hosts/web/host.mjs"], ["src/hosts/web/storage.mjs"], ["src/hosts/web/theme.mjs"],
         ["src/core/engine.mjs"], ["src/core/presets.mjs"], ["src/core/interpretation.mjs"],
         ["src/core/docs.mjs"],
     ], output);
     const html = await readFile(join(ROOT, "src/ui/ui.html"), "utf8");
     const worker = await readFile(join(ROOT, "src/hosts/web/service-worker.mjs"), "utf8");
-    await writeFile(join(output, "index.html"), html.replace(
-        '    <meta charset="utf-8" />',
-        `    <meta charset="utf-8" />\n    <meta http-equiv="Content-Security-Policy" content="${webCsp}" />`,
-    ));
+    await writeFile(join(output, "index.html"), html
+        .replace('<html lang="en">', '<html lang="en" data-web-host>')
+        .replace(
+            '    <meta charset="utf-8" />',
+            `    <meta charset="utf-8" />\n    <meta http-equiv="Content-Security-Policy" content="${webCsp}" />`,
+        ));
     await writeFile(join(output, "service-worker.mjs"), worker.replace('"__BUILD_VERSION__"', JSON.stringify(appVersion)));
     await rewriteImports(["ui.js", "host.mjs", "storage.mjs"], output);
     await addChartClasses(output);

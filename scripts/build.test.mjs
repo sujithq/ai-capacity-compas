@@ -8,7 +8,7 @@ const extension = new URL("../dist/extension/ai-capacity-compass/", import.meta.
 test("web build has the custom domain and local-only app resources", async () => {
     assert.equal((await readFile(new URL("CNAME", web), "utf8")).trim(), "ai-capacity-compass.quintelier.dev");
     const files = await readdir(web);
-    for (const name of ["index.html", "ui.css", "ui.js", "favicon.svg", "host.mjs", "storage.mjs", "engine.mjs", "docs.mjs", "version.mjs"]) {
+    for (const name of ["index.html", "ui.css", "ui.js", "favicon.svg", "host.mjs", "storage.mjs", "theme.mjs", "engine.mjs", "docs.mjs", "version.mjs"]) {
         assert.ok(files.includes(name), `missing ${name}`);
     }
     assert.ok(!files.includes("ui.html"));
@@ -18,6 +18,7 @@ test("web build has the custom domain and local-only app resources", async () =>
     assert.match(html, /connect-src 'self'/);
     assert.match(html, /style-src 'self'/);
     assert.doesNotMatch(html, /unsafe-inline/);
+    assert.match(html, /data-web-host/);
 });
 
 test("web worker precaches all emitted app assets and uses the build version", async () => {
@@ -39,6 +40,7 @@ test("extension build is self-contained and excludes user data and stdout loggin
     }
     assert.ok(!files.includes("artifacts"));
     assert.doesNotMatch(await readFile(new URL("ui.html", extension), "utf8"), /Content-Security-Policy/i);
+    assert.doesNotMatch(await readFile(new URL("ui.html", extension), "utf8"), /data-web-host/);
     const source = (await Promise.all(files.filter((file) => file.endsWith(".mjs"))
         .map((file) => readFile(new URL(file, extension), "utf8")))).join("\n");
     assert.doesNotMatch(source, /console\.log\s*\(/);
