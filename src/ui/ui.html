@@ -19,6 +19,13 @@
         </div>
         <div class="toolbar">
             <button id="theme-toggle" class="btn" type="button" aria-pressed="false" hidden>Switch to dark theme</button>
+            <label id="style-control" class="style-control" for="style-select" hidden>
+                Visual style
+                <select id="style-select" title="Visual style">
+                    <option value="classic">Classic</option>
+                    <option value="fluent">Fluent</option>
+                </select>
+            </label>
             <label class="sr-only" for="scenario-select">Scenario</label>
             <select id="scenario-select" title="Active scenario"></select>
             <select id="new-select" title="Create scenario">

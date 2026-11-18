@@ -39,8 +39,11 @@ test("extension build is self-contained and excludes user data and stdout loggin
         assert.ok(files.includes(name), `missing ${name}`);
     }
     assert.ok(!files.includes("artifacts"));
-    assert.doesNotMatch(await readFile(new URL("ui.html", extension), "utf8"), /Content-Security-Policy/i);
-    assert.doesNotMatch(await readFile(new URL("ui.html", extension), "utf8"), /data-web-host/);
+    const html = await readFile(new URL("ui.html", extension), "utf8");
+    assert.doesNotMatch(html, /Content-Security-Policy/i);
+    assert.doesNotMatch(html, /data-web-host/);
+    assert.match(html, /id="style-control"[^>]*hidden/);
+    assert.doesNotMatch(await readFile(new URL("host.mjs", extension), "utf8"), /canSelectStyle/);
     const source = (await Promise.all(files.filter((file) => file.endsWith(".mjs"))
         .map((file) => readFile(new URL(file, extension), "utf8")))).join("\n");
     assert.doesNotMatch(source, /console\.log\s*\(/);

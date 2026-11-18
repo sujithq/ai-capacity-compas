@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { THEME_STORAGE_KEY, WebTheme } from "./theme.mjs";
+import { STYLE_STORAGE_KEY, THEME_STORAGE_KEY, WebStyle, WebTheme } from "./theme.mjs";
 
 class MemoryStorage {
     values = new Map();
@@ -58,5 +58,24 @@ test("theme preference persists and system changes apply only before explicit ch
     assert.deepEqual(updates, ["dark", "dark"]);
     unsubscribe();
     assert.equal(media.listeners.get("change").size, 0);
+    assert.equal(windowObject.listeners.get("storage").size, 0);
+});
+
+test("style defaults to Classic, persists independently, and syncs across tabs", () => {
+    const storage = new MemoryStorage();
+    const windowObject = new EventTargetMock();
+    const style = new WebStyle(storage, windowObject);
+    const updates = [];
+    const unsubscribe = style.subscribe((value) => updates.push(value));
+
+    assert.equal(style.getStyle(), "classic");
+    style.setStyle("fluent");
+    assert.equal(storage.getItem(STYLE_STORAGE_KEY), "fluent");
+    assert.equal(new WebStyle(storage, windowObject).getStyle(), "fluent");
+    assert.equal(new WebTheme(storage, new MediaMock(false), windowObject).getTheme(), "light");
+    windowObject.emit("storage", { key: STYLE_STORAGE_KEY });
+    assert.deepEqual(updates, ["fluent"]);
+    assert.throws(() => style.setStyle("modern"), /Unsupported style/);
+    unsubscribe();
     assert.equal(windowObject.listeners.get("storage").size, 0);
 });

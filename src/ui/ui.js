@@ -552,6 +552,21 @@ async function connect() {
             });
             host.subscribeTheme(applyTheme);
         }
+        if (host.capabilities.canSelectStyle) {
+            const styleControl = $("style-control");
+            const styleSelect = $("style-select");
+            styleControl.hidden = false;
+            const applyStyle = (style) => {
+                document.documentElement.dataset.style = style;
+                styleSelect.value = style;
+            };
+            applyStyle(host.getStyle());
+            styleSelect.addEventListener("change", () => {
+                host.setStyle(styleSelect.value);
+                applyStyle(styleSelect.value);
+            });
+            host.subscribeStyle(applyStyle);
+        }
         $("export-btn").hidden = !host.capabilities.canImportExport;
         $("import-btn").hidden = !host.capabilities.canImportExport;
         if (host.capabilities.canCopyBriefing) {

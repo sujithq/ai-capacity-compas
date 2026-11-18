@@ -1,9 +1,10 @@
 import { buildFacts, GUARDRAILS } from "../../core/interpretation.mjs";
 import { WebScenarioStore } from "./storage.mjs";
-import { WebTheme } from "./theme.mjs";
+import { WebStyle, WebTheme } from "./theme.mjs";
 
 const store = new WebScenarioStore();
 const theme = new WebTheme();
+const style = new WebStyle();
 
 export function buildWebBriefing(scenario, result) {
     return [
@@ -17,10 +18,13 @@ export function buildWebBriefing(scenario, result) {
 }
 
 export const host = {
-    capabilities: { canInterpret: false, canCopyBriefing: true, canImportExport: true, canToggleTheme: true, offline: true },
+    capabilities: { canInterpret: false, canCopyBriefing: true, canImportExport: true, canToggleTheme: true, canSelectStyle: true, offline: true },
     getTheme: () => theme.getTheme(),
     setTheme: (value) => theme.setTheme(value),
     subscribeTheme: (listener) => theme.subscribe(listener),
+    getStyle: () => style.getStyle(),
+    setStyle: (value) => style.setStyle(value),
+    subscribeStyle: (listener) => style.subscribe(listener),
     load: () => store.load(),
     subscribe: (listener) => store.subscribe(listener),
     async update(id, patch, expectedVersion) { return store.update(id, patch, expectedVersion); },

@@ -28,7 +28,7 @@ npm test
 npm run serve
 ```
 
-`npm run serve` builds `dist/web` and serves its `index.html` at `http://127.0.0.1:4173`, just as GitHub Pages serves the deployed build. The web app follows the system light/dark preference by default; its accessible theme toggle remembers an explicit choice in browser storage. The canvas inherits Copilot's theme and has no separate theme toggle. Only the web build adds a Content Security Policy; the canvas can still receive Copilot's theme styles. Scenario data on the web app stays in that browser's local storage. Online visits check the network for current assets; after the service worker installs, the versioned app cache provides an offline fallback. The app makes no analytics, telemetry, backend, or AI API calls; the AI briefing action copies calculated facts and guardrails to the clipboard, or you can copy them manually from the preview.
+`npm run serve` builds `dist/web` and serves its `index.html` at `http://127.0.0.1:4173`, just as GitHub Pages serves the deployed build. The web app follows the system light/dark preference by default; its accessible theme toggle remembers an explicit choice in browser storage. The Visual style selector offers Classic (the default) and Fluent, and remembers an explicit choice separately. Fluent uses Microsoft Fluent-inspired typography, blue accents, surfaces, and controls; it is an independent visual option, not an affiliation claim. Both styles work with light and dark themes. The canvas inherits Copilot's theme and has no separate theme or style selector. Only the web build adds a Content Security Policy; the canvas can still receive Copilot's theme styles. Scenario data on the web app stays in that browser's local storage. Online visits check the network for current assets; after the service worker installs, the versioned app cache provides an offline fallback. The app makes no analytics, telemetry, backend, or AI API calls; the AI briefing action copies calculated facts and guardrails to the clipboard, or you can copy them manually from the preview.
 
 ## Copilot canvas extension
 
@@ -112,6 +112,8 @@ Imports accept only this format/version, validate every scenario's fields and va
 ## Documentation references
 
 The dashboard links to Microsoft Learn references for [throughput and latency](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/latency), [token and request metrics](https://learn.microsoft.com/en-us/azure/foundry/openai/monitor-openai-reference), [quota allocation](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/quota), [quota tiers and limits](https://learn.microsoft.com/en-us/azure/foundry/openai/quotas-limits), [deployment types](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/deployment-types), and [provisioned throughput sizing](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/provisioned-throughput-sizing). These are references only; no quota information is fetched or verified.
+
+The Fluent-inspired visual option takes design cues from the [Fluent 2 design system](https://fluent2.microsoft.design/); it uses no external fonts, scripts, or runtime resources.
 
 ## License
 

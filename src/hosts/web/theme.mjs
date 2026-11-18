@@ -1,5 +1,7 @@
 export const THEME_STORAGE_KEY = "ai-capacity-compass.theme";
+export const STYLE_STORAGE_KEY = "ai-capacity-compass.style";
 const THEMES = new Set(["light", "dark"]);
+const STYLES = new Set(["classic", "fluent"]);
 const NO_MEDIA = { matches: false, addEventListener() {}, removeEventListener() {} };
 const NO_WINDOW = { addEventListener() {}, removeEventListener() {} };
 
@@ -38,5 +40,30 @@ export class WebTheme {
             this.media.removeEventListener("change", update);
             this.window.removeEventListener("storage", onStorage);
         };
+    }
+}
+
+export class WebStyle {
+    constructor(storage = globalThis.localStorage, windowObject = globalThis.window ?? NO_WINDOW) {
+        this.storage = storage;
+        this.window = windowObject;
+    }
+
+    getStyle() {
+        const preference = this.storage.getItem(STYLE_STORAGE_KEY);
+        return STYLES.has(preference) ? preference : "classic";
+    }
+
+    setStyle(style) {
+        if (!STYLES.has(style)) throw new Error(`Unsupported style: ${style}`);
+        this.storage.setItem(STYLE_STORAGE_KEY, style);
+    }
+
+    subscribe(listener) {
+        const onStorage = (event) => {
+            if (event.key === STYLE_STORAGE_KEY) listener(this.getStyle());
+        };
+        this.window.addEventListener("storage", onStorage);
+        return () => this.window.removeEventListener("storage", onStorage);
     }
 }
