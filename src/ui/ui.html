@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'none'; form-action 'self'; object-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; worker-src 'self';" />
+    <title>AI Capacity Compass</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./ui.css" />
+</head>
+<body>
+    <header class="topbar">
+        <div class="brand">
+            <span class="logo" aria-hidden="true">🧭</span>
+            <div>
+                <h1>AI Capacity Compass</h1>
+                <p class="muted small">Deterministic TPM / RPM capacity planning for AI inference</p>
+                <p id="app-version" class="muted small"></p>
+            </div>
+        </div>
+        <div class="toolbar">
+            <label class="sr-only" for="scenario-select">Scenario</label>
+            <select id="scenario-select" title="Active scenario"></select>
+            <select id="new-select" title="Create scenario">
+                <option value="">＋ New…</option>
+                <option value="blank">Blank scenario</option>
+                <option value="duplicate">Duplicate current</option>
+                <optgroup label="From example preset" id="preset-options"></optgroup>
+            </select>
+            <button id="reset-btn" class="btn" title="Restore this example to its preset values">Reset example</button>
+            <button id="delete-btn" class="btn danger" title="Delete scenario">Delete</button>
+            <button id="export-btn" class="btn" hidden>Export JSON</button>
+            <button id="import-btn" class="btn" hidden>Import JSON</button>
+            <input id="import-file" type="file" accept="application/json,.json" hidden />
+        </div>
+    </header>
+
+    <div id="example-banner" class="banner info" hidden>
+        <strong>Illustrative example.</strong> Preset values are placeholders to demonstrate capacity shapes — not real workload measurements or provider quotas. Edit them freely.
+    </div>
+    <div id="conn-banner" class="banner warn" hidden>Reconnecting to the canvas server…</div>
+    <div id="save-error" class="banner warn" role="alert" hidden>
+        <span id="save-error-text"></span>
+        <button id="load-saved-btn" class="btn" title="Discard this scenario's unsaved draft and load its saved values">Load saved values</button>
+    </div>
+
+    <main class="layout">
+        <section class="col config">
+            <article class="card">
+                <h2>Scenario</h2>
+                <div class="field">
+                    <label for="scenario-name">Name</label>
+                    <input id="scenario-name" type="text" maxlength="80" />
+                </div>
+                <div class="field">
+                    <label for="scenario-notes">Notes</label>
+                    <textarea id="scenario-notes" rows="2" maxlength="1000"></textarea>
+                </div>
+                <h3>Workload</h3>
+                <div id="workload-fields" class="fields"></div>
+            </article>
+            <article class="card">
+                <h2>Deployment</h2>
+                <p class="muted small">Quotas are user-supplied. There is no universal TPM/RPM ratio — use your provider's documented values for this model and deployment type.</p>
+                <p class="muted small">Azure OpenAI / Foundry documentation links below are references only. Check your model version, deployment type and subscription. No quota values are imported or verified automatically.</p>
+                <div id="deployment-fields" class="fields"></div>
+                <div id="effective-quota" class="quota-readout"></div>
+            </article>
+        </section>
+
+        <section class="col results">
+            <article class="card">
+                <div id="status" class="status"></div>
+                <ul id="issues" class="issues"></ul>
+                <div id="kpis" class="kpis"></div>
+            </article>
+            <article class="card">
+                <h2>Capacity utilization</h2>
+                <div id="util-bars"></div>
+                <h3>Demand vs theoretical ceiling</h3>
+                <div id="throughput"></div>
+                <h3>Token consumption per request</h3>
+                <div id="tokens"></div>
+            </article>
+            <article id="interpretation-card" class="card">
+                <div class="card-head">
+                    <h2>AI interpretation</h2>
+                    <button id="interpret-btn" class="btn primary">Ask agent to interpret</button>
+                </div>
+                <p id="interpretation-help" class="muted small">The agent explains a snapshot of saved inputs, not live edits. Ask again after changes. Mismatches block the request without overwriting saved values.</p>
+                <div id="interp-status" class="interp-status"></div>
+                <div id="interp-body" class="markdown"></div>
+            </article>
+        </section>
+
+        <section class="col-full">
+            <article class="card">
+                <h2>Scenario comparison</h2>
+                <div id="compare-picker" class="chips"></div>
+                <div id="compare-chart"></div>
+                <div class="table-wrap"><table id="compare-table"></table></div>
+            </article>
+            <details class="card assumptions">
+                <summary><h2>Assumptions &amp; method</h2></summary>
+                <ul id="assumptions"></ul>
+                <ul class="muted small method">
+                    <li>Peak RPM = users × requests/user/min × peak × growth. Peak RPS = Peak RPM ÷ 60.</li>
+                    <li>Required TPM = Peak RPM × rate-limit tokens per request. Headroom values divide by target utilization.</li>
+                    <li>Utilization = requirement ÷ effective quota. The bottleneck is the dimension with the higher utilization.</li>
+                    <li>Theoretical max RPM = min(TPM ÷ rate-limit tokens per request, RPM). This is a quota ceiling, not achieved throughput.</li>
+                    <li>Shortfall = max(0, required with headroom − effective quota).</li>
+                </ul>
+            </details>
+        </section>
+    </main>
+    <script type="module" src="./ui.js"></script>
+</body>
+</html>

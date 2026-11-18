@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm test
+      - run: zip -r ai-capacity-compass-extension.zip dist/extension/ai-capacity-compass
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ai-capacity-compass-extension
+          path: ai-capacity-compass-extension.zip
+          if-no-files-found: error
