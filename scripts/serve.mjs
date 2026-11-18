@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs";
-import { access } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,14 +18,19 @@ const server = createServer(async (req, res) => {
     try {
         const url = new URL(req.url, "http://127.0.0.1");
         const decoded = decodeURIComponent(url.pathname);
-        const candidate = decoded === "/" ? join(ROOT, "ui.html") : resolve(ROOT, `.${decoded}`);
+        const candidate = resolve(ROOT, `.${decoded}`);
         if (candidate !== ROOT && !candidate.startsWith(`${ROOT}${sep}`)) {
             res.writeHead(403).end("Forbidden");
             return;
         }
-        let file = candidate;
-        try { await access(file); }
-        catch { res.writeHead(404).end("Not found"); return; }
+        const file = decoded.endsWith("/") ? join(candidate, "index.html") : candidate;
+        try {
+            if (!(await stat(file)).isFile()) { res.writeHead(404).end("Not found"); return; }
+        } catch (error) {
+            if (error.code !== "ENOENT" && error.code !== "ENOTDIR") throw error;
+            res.writeHead(404).end("Not found");
+            return;
+        }
         res.writeHead(200, {
             "Content-Type": MIME[extname(file)] || "application/octet-stream",
             "Content-Security-Policy": "default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; worker-src 'self';",

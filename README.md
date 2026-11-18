@@ -28,7 +28,7 @@ npm test
 npm run serve
 ```
 
-`npm run serve` builds `dist/web` and serves it at `http://127.0.0.1:4173`. Scenario data on the web app stays in that browser's local storage. The service worker caches the app's same-origin assets for offline use after the first load. The app makes no analytics, telemetry, backend, or AI API calls; the AI briefing action copies calculated facts and guardrails to the clipboard.
+`npm run serve` builds `dist/web` and serves its `index.html` at `http://127.0.0.1:4173`, just as GitHub Pages serves the deployed build. Only the web build adds a Content Security Policy; the canvas can still receive Copilot's theme styles. Scenario data on the web app stays in that browser's local storage. Online visits check the network for current assets; after the service worker installs, the versioned app cache provides an offline fallback. The app makes no analytics, telemetry, backend, or AI API calls; the AI briefing action copies calculated facts and guardrails to the clipboard, or you can copy them manually from the preview.
 
 ## Copilot canvas extension
 

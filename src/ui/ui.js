@@ -476,7 +476,12 @@ $("interpret-btn").addEventListener("click", async () => {
         const s = active();
         const r = calculateCapacity(s);
         if (!r.valid) throw new Error("fix invalid inputs first");
-        await host.interpret(s, r);
+        try { await host.interpret(s, r); }
+        catch (error) {
+            if (!host.capabilities.canCopyBriefing) throw error;
+            flash("Couldn't copy to the clipboard. Select and copy the briefing text in the preview below.");
+            return;
+        }
         if (host.capabilities.canCopyBriefing) $("interp-status").textContent = "Copied the calculated facts and guardrails to the clipboard.";
     }
     catch (err) { showSaveError(err); flash(`Interpretation request failed: ${err.message}`); }

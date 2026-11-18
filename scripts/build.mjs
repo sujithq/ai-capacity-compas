@@ -9,6 +9,7 @@ const packageJson = JSON.parse(await readFile(join(ROOT, "package.json"), "utf8"
 let gitSha = "unknown";
 try { gitSha = execFileSync("git", ["rev-parse", "--short", "HEAD"], { cwd: ROOT, encoding: "utf8" }).trim(); } catch {}
 const appVersion = `${packageJson.version}+${gitSha}`;
+const webCsp = "default-src 'self'; base-uri 'none'; form-action 'self'; object-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; worker-src 'self';";
 
 async function writeVersion(directory) {
     await writeFile(join(directory, "version.mjs"), `export const APP_VERSION = ${JSON.stringify(appVersion)};\n`);
@@ -41,12 +42,18 @@ export async function buildWeb() {
     const output = join(DIST, "web");
     await rm(output, { recursive: true, force: true });
     await copyFiles([
-        ["src/ui/ui.html"], ["src/ui/ui.css"], ["src/ui/ui.js"], ["src/ui/favicon.svg"],
+        ["src/ui/ui.css"], ["src/ui/ui.js"], ["src/ui/favicon.svg"],
         ["src/hosts/web/host.mjs"], ["src/hosts/web/storage.mjs"],
-        ["src/hosts/web/service-worker.mjs"],
         ["src/core/engine.mjs"], ["src/core/presets.mjs"], ["src/core/interpretation.mjs"],
         ["src/core/docs.mjs"],
     ], output);
+    const html = await readFile(join(ROOT, "src/ui/ui.html"), "utf8");
+    const worker = await readFile(join(ROOT, "src/hosts/web/service-worker.mjs"), "utf8");
+    await writeFile(join(output, "index.html"), html.replace(
+        '    <meta charset="utf-8" />',
+        `    <meta charset="utf-8" />\n    <meta http-equiv="Content-Security-Policy" content="${webCsp}" />`,
+    ));
+    await writeFile(join(output, "service-worker.mjs"), worker.replace('"__BUILD_VERSION__"', JSON.stringify(appVersion)));
     await rewriteImports(["ui.js", "host.mjs", "storage.mjs"], output);
     await addChartClasses(output);
     await writeVersion(output);
