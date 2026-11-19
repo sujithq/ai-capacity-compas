@@ -70,6 +70,13 @@
                 <h2>Deployment</h2>
                 <p class="muted small" id="quota-help">Quotas are user-supplied. There is no universal TPM/RPM ratio — use your provider's documented values for this model and deployment type.</p>
                 <p class="muted small">Azure OpenAI / Foundry documentation links below are references only. Check your model version, deployment type and subscription. No capacity values are imported or verified automatically.</p>
+                <div id="reference-control" class="field">
+                    <label for="reference-picker">Microsoft Learn reference</label>
+                    <select id="reference-picker" aria-describedby="reference-help"></select>
+                    <button id="apply-reference" class="btn" type="button" disabled>Use selected reference</button>
+                    <p id="reference-help" class="muted small">Applying a record sets its provider, model, version, and deployment type. Only blank sizing inputs use documented values. Your entered values always win.</p>
+                    <div id="reference-status" class="small" role="status"></div>
+                </div>
                 <div id="deployment-fields" class="fields"></div>
                 <p id="ptu-limitation" class="note" hidden></p>
                 <div id="effective-quota" class="quota-readout"></div>

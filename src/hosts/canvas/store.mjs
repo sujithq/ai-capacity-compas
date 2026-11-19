@@ -314,7 +314,11 @@ export class ScenarioStore extends EventEmitter {
         return this._mutate(() => {
             const s = this.require(id);
             verify?.(s);
-            s.interpretation = { ...interpretation, inputs: structuredClone({ workload: s.workload, deployment: s.deployment }) };
+            const result = calculateCapacity(s);
+            const inputs = result.provenance.reference
+                ? { ...result.inputs, deployment: { ...result.inputs.deployment, referenceId: s.deployment.referenceId } }
+                : { workload: s.workload, deployment: s.deployment };
+            s.interpretation = { ...interpretation, inputs: structuredClone(inputs) };
             s.interpretationPending = null;
             s.interpretationPendingFingerprint = null;
             return s;

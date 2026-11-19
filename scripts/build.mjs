@@ -45,7 +45,7 @@ export async function buildWeb() {
         ["src/ui/ui.css"], ["src/ui/ui.js"], ["src/ui/favicon.svg"],
         ["src/hosts/web/host.mjs"], ["src/hosts/web/storage.mjs"], ["src/hosts/web/theme.mjs"],
         ["src/core/engine.mjs"], ["src/core/presets.mjs"], ["src/core/interpretation.mjs"],
-        ["src/core/docs.mjs"],
+        ["src/core/docs.mjs"], ["src/core/catalogue.mjs"],
     ], output);
     const html = await readFile(join(ROOT, "src/ui/ui.html"), "utf8");
     const worker = await readFile(join(ROOT, "src/hosts/web/service-worker.mjs"), "utf8");
@@ -70,7 +70,7 @@ export async function buildExtension() {
         ["src/hosts/canvas/store.mjs"], ["src/hosts/canvas/host.mjs"],
         ["src/ui/ui.html"], ["src/ui/ui.css"], ["src/ui/ui.js"], ["src/ui/favicon.svg"],
         ["src/core/engine.mjs"], ["src/core/presets.mjs"], ["src/core/interpretation.mjs"],
-        ["src/core/docs.mjs"],
+        ["src/core/docs.mjs"], ["src/core/catalogue.mjs"],
     ], output);
     await rewriteImports(["extension.mjs", "server.mjs", "store.mjs", "ui.js"], output);
     await addChartClasses(output);

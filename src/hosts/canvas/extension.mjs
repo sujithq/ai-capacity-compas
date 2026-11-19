@@ -137,6 +137,7 @@ const actions = [
         handler: (ctx) => {
             const s = scenarioOrThrow(ctx.input?.scenarioId);
             const result = calculateCapacity(s);
+            if (result.status === "unsupported") throw new CanvasError("unsupported_sizing", "This model requires a different PTU sizing method. No estimate is available.");
             if (!result.valid) throw new CanvasError("invalid_inputs", `Scenario has invalid inputs: ${result.issues.filter((i) => i.severity === "error").map((i) => i.message).join(" ")}`);
             return buildBriefing({ scenario: s, result, instanceId: ctx.instanceId });
         },

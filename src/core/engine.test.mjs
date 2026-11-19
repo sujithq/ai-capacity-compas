@@ -328,3 +328,59 @@ test("mixed comparison and PTU interpretation keep the capacity models distinct"
     assert.match(facts.sizingLimitation, /GPT-6/);
     assert.match(buildAgentPrompt({ scenario, result }), /never invent or look up per-model PTU throughput/);
 });
+
+test("exact PTU reference fills blanks but preserves manual values and the stored scenario", () => {
+    const deployment = { provider: "Azure OpenAI", modelName: "gpt-5.2", modelVersion: "2025-12-11",
+        deploymentType: "Data Zone Provisioned", referenceId: "ptu:gpt-5.2:2025-12-11:data-zone-provisioned",
+        inputTPMPerPTU: null, outputTokenRatio: 7, minimumPTUs: null, ptuScaleIncrement: null, deployedPTUs: null };
+    const scenario = provisioned(deployment);
+    const original = structuredClone(scenario);
+    const result = calculateCapacity(scenario);
+    assert.deepEqual(scenario, original);
+    assert.equal(result.inputs.deployment.inputTPMPerPTU, 3400);
+    assert.equal(result.inputs.deployment.outputTokenRatio, 7);
+    assert.equal(result.inputs.deployment.minimumPTUs, 15);
+    assert.equal(result.inputs.deployment.ptuScaleIncrement, 5);
+    assert.equal(result.ptu.deployedPTUs, null);
+    assert.equal(result.ptu.normalizedTPM, 340000);
+    const facts = buildFacts(scenario, result);
+    assert.equal(facts.provenance.fields.inputTPMPerPTU, "Documented reference");
+    assert.equal(facts.provenance.fields.outputTokenRatio, "User-entered");
+    assert.match(facts.provenance.reference.source, /learn\.microsoft\.com/);
+    assert.match(facts.provenance.reference.verified, /^\d{4}-\d{2}-\d{2}$/);
+    for (const mismatch of [{ provider: "Other" }, { modelName: "gpt-5.2-codex" }, { modelVersion: "" },
+        { deploymentType: "Regional Provisioned" }, { referenceId: "" }]) {
+        const unmatched = calculateCapacity(provisioned({ ...deployment, ...mismatch }));
+        assert.equal(unmatched.provenance.reference, null);
+        assert.equal(unmatched.ptu.requiredPTUs, null);
+        assert.notEqual(result.fingerprint, unmatched.fingerprint);
+    }
+});
+
+test("documented quota conversion estimates RPM only from a user allocation and loses to overrides", () => {
+    const reference = { provider: "Azure OpenAI", modelName: "gpt-chat-latest", modelVersion: "2026-05-05",
+        deploymentType: "Global Standard", referenceId: "quota:gpt-chat-latest:2026-05-05:global-standard",
+        allocatedTPM: null, allocatedRPM: null, rpmPer1000TPM: null };
+    const calc = (patch) => calculateCapacity(withD({ ...reference, ...patch }));
+    assert.equal(calc().quota.effectiveTPM, null);
+    assert.equal(calc().quota.effectiveRPM, null);
+    const estimated = calc({ allocatedTPM: 20000 });
+    assert.equal(estimated.quota.effectiveRPM, 200);
+    assert.equal(estimated.provenance.effectiveQuota.rpm, "Derived estimate");
+    const manual = calc({ allocatedTPM: 20000, allocatedRPM: 123, rpmOverride: 88 });
+    assert.equal(manual.quota.effectiveRPM, 88);
+    assert.equal(manual.provenance.effectiveQuota.rpm, "User-entered override");
+    assert.equal(calc({ allocatedTPM: 20000, allocatedRPM: 0 }).quota.effectiveRPM, 0);
+    assert.equal(calc({ allocatedTPM: 20000, rpmPer1000TPM: 3 }).quota.effectiveRPM, 60);
+    assert.equal(calc({ allocatedTPM: 20000, deploymentType: "Data Zone Standard" }).quota.effectiveRPM, null);
+});
+
+test("known unsupported PTU methods cannot produce estimates even with manual coefficients", () => {
+    for (const name of ["GPT-6.2-Sol", "gpt-7-preview", "gpt-image-2.5-flare"]) {
+        const r = calculateCapacity(provisioned({ modelName: name }));
+        assert.equal(r.status, "unsupported");
+        assert.equal(r.throughput, null);
+        assert.equal(buildFacts(provisioned(), r).statusLabel, "Unsupported PTU sizing method");
+    }
+    assert.equal(calculateCapacity(provisioned({ modelName: "Unknown model" })).valid, true);
+});

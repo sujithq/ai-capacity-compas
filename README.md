@@ -16,6 +16,16 @@ The RPM ceiling assumes the same request mix. Actual throughput requires benchma
 
 ## Architecture
 
+### Documented reference catalogue
+
+In the Deployment panel, choose a **Microsoft Learn reference**, then select **Use selected reference**. The selection sets the exact provider, model, version, and deployment type shown in the picker. It supplies calculation defaults only for blank sizing fields; existing fields are never replaced. Editing the identity to a different combination stops the reference from applying. Select **Manual inputs / no reference** and **Clear reference** to disable it.
+
+The bundled Azure OpenAI snapshot (`2026-11-19.1`, verified November 19, 2026) covers 18 versioned text models across Global, Data Zone, and Regional Provisioned, plus six exact `gpt-chat-latest` version/deployment combinations with explicitly documented quota conversion ratios. GPT-6+ and GPT-image variants use different sizing methods and produce no PTU estimate. Unlisted combinations stay manual; generic capacity-unit examples, unversioned PTU rows, and tier ceilings are not used to infer missing records.
+
+Sources: [PTU parameters](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/provisioned-throughput-sizing), [quota management](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/quota), and [explicit quota-tier conversion ratios](https://learn.microsoft.com/en-us/azure/foundry/openai/quotas-limits#quota-tier-reference). The catalogue is offline, not live, and neither verifies availability nor sets assigned TPM/RPM or deployed PTUs. With user-entered TPM and blank RPM, a documented or manual ratio yields a **derived estimate**; explicit RPM and overrides remain authoritative. Recheck the documentation and your actual allocation in Foundry before making deployment decisions.
+
+### Shared hosts
+
 ```mermaid
 flowchart LR
   Core[Shared calculation and briefing core] --> UI[Shared dashboard]
@@ -121,6 +131,8 @@ Web import/export uses a versioned JSON envelope compatible with the scenario da
 Imports accept only this format/version, validate every scenario's fields and values, discard unknown properties and old interpretations, and reject malformed or oversized files. Import replaces the scenarios saved in the current browser after confirmation; export a backup first if needed. The canvas stores its scenarios separately and does not send them to the website.
 
 Version 1 scenarios without `deployment.capacityModel` still load as `quota`. For PTU scenarios set it to `ptu`; the optional numeric fields are `deployedPTUs`, `inputTPMPerPTU`, `outputTokenRatio`, `promptCacheRatePct` (0–100), `minimumPTUs`, and `ptuScaleIncrement`. Use `null` or omit an unknown value. Switching modes preserves the other mode's inputs but ignores them in calculations.
+
+The optional `deployment.modelVersion` and `deployment.referenceId` keep the selected catalogue identity. Export stores the reference ID, not copied coefficients. On import, it is applied only if it resolves to an exact identity and mode in the installed catalogue. A later catalogue update can therefore revise the documented defaults; manual values remain unchanged.
 
 ## Documentation references
 

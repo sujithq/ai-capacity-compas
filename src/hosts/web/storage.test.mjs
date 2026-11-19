@@ -84,6 +84,19 @@ test("legacy version 1 loads as quota and PTU imports validate their mode and in
     assert.throws(() => parseScenarioExport(JSON.stringify(file)), /capacityModel/);
 });
 
+test("reference exports retain literal manual fields and re-resolve the exact catalogue ID", () => {
+    const file = JSON.parse(exportScenarioState(new WebScenarioStore(new MemoryStorage()).load()));
+    const scenario = file.scenarios.find((s) => s.deployment.capacityModel === "ptu");
+    Object.assign(scenario.deployment, { provider: "Azure OpenAI", modelName: "gpt-5.2", modelVersion: "2025-12-11",
+        deploymentType: "Regional Provisioned", referenceId: "ptu:gpt-5.2:2025-12-11:regional-provisioned", inputTPMPerPTU: null });
+    const imported = parseScenarioExport(JSON.stringify(file)).scenarios.find((s) => s.id === scenario.id);
+    assert.equal(imported.deployment.inputTPMPerPTU, null);
+    assert.equal(calculateCapacity(imported).inputs.deployment.inputTPMPerPTU, 3400);
+    assert.equal(calculateCapacity(imported).inputs.deployment.minimumPTUs, scenario.deployment.minimumPTUs);
+    scenario.deployment.modelName = "gpt-6-astra";
+    assert.equal(calculateCapacity(parseScenarioExport(JSON.stringify(file)).scenarios.find((s) => s.id === scenario.id)).status, "unsupported");
+});
+
 test("web briefing includes the same calculated facts and guardrails as the canvas", () => {
     const store = new WebScenarioStore(new MemoryStorage());
     const scenario = store.load().scenarios[0];

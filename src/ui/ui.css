@@ -151,7 +151,9 @@ textarea { width: 100%; resize: vertical; }
 .status .pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--bg); border: 1px solid var(--border); font-weight: normal; }
 .status.sufficient { background: var(--ok-muted); color: var(--ok); }
 .status.at-risk, .status.incomplete { background: var(--warn-muted); color: var(--warn); }
-.status.insufficient, .status.invalid { background: var(--bad-muted); color: var(--bad); }
+.status.insufficient, .status.invalid, .status.unsupported { background: var(--bad-muted); color: var(--bad); }
+#reference-picker { width: 100%; min-width: 0; }
+#apply-reference { align-self: flex-start; }
 .status.no-demand { background: var(--info-muted); }
 .status .sub { color: var(--fg); font-weight: normal; font-size: 12px; }
 

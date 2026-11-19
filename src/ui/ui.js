@@ -6,6 +6,7 @@ import {
     CAPACITY_MODELS, PTU_FIELDS, PTU_LIMITATION, capacityStatusLabel,
 } from "../core/engine.mjs";
 import { FIELD_DOCS } from "../core/docs.mjs";
+import { CATALOGUE, CATALOGUE_VERIFIED, CATALOGUE_VERSION, matchReference, QUOTA_GUIDE, PTU_SOURCE, QUOTA_REFERENCE_NOTICE } from "../core/catalogue.mjs";
 import { host } from "./host.mjs";
 import { APP_VERSION } from "./version.mjs";
 
@@ -16,7 +17,7 @@ const SLIDERS = {
 };
 const DEPLOYMENT_GROUPS = [
     ["", ["capacityModel"]],
-    ["Identification (not used in math)", ["provider", "modelName", "deploymentType"]],
+    ["Deployment identity", ["provider", "modelName", "modelVersion", "deploymentType"]],
     ["Quota", ["allocatedTPM", "allocatedRPM", "rpmPer1000TPM"], "quota"],
     ["Manual overrides", ["tpmOverride", "rpmOverride"], "quota"],
     ["Provisioned sizing (user-supplied)", PTU_FIELDS.map((f) => f.key), "ptu"],
@@ -142,6 +143,7 @@ function fieldHtml(section, f, model) {
         <label for="${id}">${esc(f.label)}${f.unit && f.unit !== "ratio" ? `<span class="unit">${esc(f.unit)}</span>` : ""}</label>
         ${slider ? `<div class="range-row"><input type="range" min="${slider.min}" max="${slider.max}" step="${slider.step}" data-range-for="${id}" aria-label="${esc(f.label)} slider" />${input}</div>` : input}
         <div class="msg"></div>
+        <div class="help field-source" hidden></div>
         ${f.help ? `<div class="help">${esc(f.help)}</div>` : ""}
         ${(Array.isArray(doc) ? doc : doc ? [doc] : []).map((link) =>
         `<div class="help"><a class="doc-link" href="${esc(link.url)}" target="_blank" rel="noopener noreferrer">${esc(link.label)}<span class="sr-only"> (opens in a new tab)</span></a></div>`).join("")}
@@ -155,7 +157,23 @@ function buildForm() {
     const byKey = Object.fromEntries(DEPLOYMENT_FIELDS.map((f) => [f.key, f]));
     $("deployment-fields").innerHTML = DEPLOYMENT_GROUPS.map(([label, keys, model]) =>
         `${label ? `<div class="group-label"${model ? ` data-capacity-mode="${model}"${model === "ptu" ? " hidden" : ""}` : ""}>${esc(label)}</div>` : ""}${keys.map((k) => fieldHtml("deployment", byKey[k], model)).join("")}`).join("");
+    $("deployment-capacityModel").closest(".field").after($("reference-control"));
     $("ptu-limitation").textContent = PTU_LIMITATION;
+    $("reference-picker").addEventListener("change", syncReferenceButton);
+    $("apply-reference").addEventListener("click", () => {
+        const s = active();
+        if (!s) return;
+        const id = $("reference-picker").value;
+        const entry = CATALOGUE.find((row) => row.id === id && row.mode === (s.deployment.capacityModel ?? "quota"));
+        if (entry) {
+            const { provider, modelName, modelVersion, deploymentType } = entry;
+            Object.assign(s.deployment, { provider, modelName, modelVersion, deploymentType, referenceId: id });
+        } else if (id === "manual") {
+            s.deployment.referenceId = "";
+        } else return;
+        scheduleSave(s);
+        renderAll(false);
+    });
     for (const el of document.querySelectorAll("[data-section]")) el.addEventListener(el.tagName === "SELECT" ? "change" : "input", onFieldInput);
     for (const el of document.querySelectorAll("[data-range-for]")) {
         el.addEventListener("input", () => {
@@ -163,6 +181,48 @@ function buildForm() {
             target.value = el.value;
             target.dispatchEvent(new Event("input"));
         });
+    }
+}
+
+function syncReferenceButton() {
+    const s = active();
+    const id = $("reference-picker").value;
+    const enabled = id === "manual" ? Boolean(s?.deployment.referenceId) : Boolean(id && id !== s?.deployment.referenceId);
+    $("apply-reference").disabled = !enabled;
+    $("apply-reference").textContent = id === "manual" ? "Clear reference" : "Use selected reference";
+}
+
+function renderReference(s, r, mode) {
+    const picker = $("reference-picker");
+    const match = matchReference(s.deployment);
+    const ref = r.provenance.reference;
+    const option = (entry) => `<option value="${esc(entry.id)}">${esc(`${entry.provider} / ${entry.modelName} / ${entry.modelVersion} / ${entry.deploymentType}${entry.supported ? "" : " (unsupported)"}`)}</option>`;
+    const selectionKey = JSON.stringify([s.id, mode, match?.id, s.deployment.referenceId]);
+    if (picker.dataset.mode !== mode) {
+        picker.innerHTML = '<option value="manual">Manual inputs / no reference</option>'
+            + CATALOGUE.filter((entry) => entry.mode === mode).map(option).join("");
+        picker.dataset.mode = mode;
+    }
+    if (picker.dataset.selectionKey !== selectionKey) {
+        picker.value = ref?.id ?? match?.id ?? "manual";
+    }
+    picker.dataset.selectionKey = selectionKey;
+    syncReferenceButton();
+    const link = (url, label) => `<a class="doc-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`;
+    const source = ref?.source ?? match?.source ?? (mode === "ptu" ? PTU_SOURCE : QUOTA_GUIDE);
+    const headline = r.status === "unsupported" ? "Unsupported PTU sizing method"
+        : ref ? "Documented reference active" : match ? "Exact match available; not applied" : "Not available in catalogue for this identity";
+    const content = `<strong>${headline}</strong> · ${link(source, "Microsoft Learn source")} · Catalogue ${CATALOGUE_VERSION}, verified ${CATALOGUE_VERIFIED}. ${
+        esc(mode === "quota" ? QUOTA_REFERENCE_NOTICE : "Published coefficients can change and do not guarantee deployment availability.")}`;
+    if ($("reference-status").innerHTML !== content) $("reference-status").innerHTML = content;
+    for (const [key, state] of Object.entries(r.provenance.fields)) {
+        const input = $(`deployment-${key}`);
+        const label = input.closest(".field").querySelector(".field-source");
+        const value = ref?.values[key];
+        input.placeholder = state === "Documented reference" ? String(value) : "blank = not set";
+        label.hidden = state === "Not set";
+        label.textContent = state === "Documented reference" ? `${state}: ${fmt(value, 6)} (enter a value to override)`
+            : value !== undefined ? `${state} overrides documented ${fmt(value, 6)}` : state;
     }
 }
 
@@ -237,6 +297,7 @@ function renderResults() {
     $("quota-help").hidden = $("quota-method").hidden = mode === "ptu";
     $("ptu-limitation").hidden = mode !== "ptu";
     $("token-heading").textContent = mode === "ptu" ? "Normalized token demand at peak" : "Token consumption per request";
+    renderReference(s, r, mode);
 
     // field-level messages
     for (const el of document.querySelectorAll(".field[data-path]")) {
@@ -249,7 +310,7 @@ function renderResults() {
     const st = $("status");
     st.className = `status ${r.status}`;
     if (!r.valid) {
-        st.innerHTML = `<span>${esc(STATUS_LABELS.invalid)}</span><span class="sub">Fix the highlighted fields to see results.</span>`;
+        st.innerHTML = `<span>${esc(STATUS_LABELS[r.status])}</span><span class="sub">${r.status === "unsupported" ? "No PTU estimate is calculated for this method." : "Fix the highlighted fields to see results."}</span>`;
         $("kpis").innerHTML = ""; $("util-bars").innerHTML = ""; $("throughput").innerHTML = ""; $("tokens").innerHTML = ""; $("effective-quota").innerHTML = ""; $("assumptions").innerHTML = "";
         return;
     }
@@ -257,8 +318,8 @@ function renderResults() {
     const m = r.metrics; const u = r.utilization; const t = r.throughput; const q = r.quota; const sf = r.shortfall;
     st.innerHTML = `<span>${esc(STATUS_LABELS[r.status])}</span><span class="pill">Bottleneck: ${esc(r.bottleneck.primary)}</span><span class="sub">${esc(r.bottleneck.reason)}</span>`;
 
-    const src = { override: "manual override", allocated: "allocated", derived: "derived from ratio", missing: "not set" };
-    $("effective-quota").innerHTML = `<strong>Effective quota</strong><br/>TPM: ${fmt(q.effectiveTPM)} <span class="muted">(${src[q.tpmSource]})</span><br/>RPM: ${fmt(q.effectiveRPM, 2)} <span class="muted">(${src[q.rpmSource]})</span>`;
+    const src = r.provenance.effectiveQuota;
+    $("effective-quota").innerHTML = `<strong>Effective quota</strong><br/>TPM: ${fmt(q.effectiveTPM)} <span class="muted">(${src.tpm})</span><br/>RPM: ${fmt(q.effectiveRPM, 2)} <span class="muted">(${src.rpm}${q.rpmSource === "derived" ? " from ratio" : ""})</span>`;
 
     const tgt = m.targetUtilization;
     $("kpis").innerHTML = [
@@ -417,6 +478,7 @@ const showInput = (v) => (blank(v) ? "—" : typeof v === "number" ? new Intl.Nu
 /** Compare the inputs an interpretation was written for with the scenario's current inputs. */
 function inputRows(used, s) {
     const current = calculateCapacity(s).inputs;
+    if (s.deployment.referenceId) current.deployment.referenceId = s.deployment.referenceId;
     return INPUT_FIELDS.filter(([section, f]) => f.key === "capacityModel"
         || Object.hasOwn(current[section], f.key) || Object.hasOwn(used?.[section] ?? {}, f.key)).map(([section, f]) => {
         const before = used?.[section]?.[f.key] ?? (f.key === "capacityModel" ? "quota" : undefined);

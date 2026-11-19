@@ -50,7 +50,8 @@ function scenarioForImport(input, index, seenIds) {
     const workload = safeSection(input.workload, WORKLOAD_FIELDS, `Scenario ${id} workload`);
     const deployment = safeSection(input.deployment, DEPLOYMENT_FIELDS, `Scenario ${id} deployment`);
     const result = calculateCapacity({ workload, deployment });
-    if (!result.valid) throw new Error(`Scenario ${id} has invalid inputs: ${result.issues.filter((issue) => issue.severity === "error").map((issue) => issue.message).join(" ")}`);
+    const errors = result.issues.filter((issue) => issue.severity === "error");
+    if (errors.length) throw new Error(`Scenario ${id} has invalid inputs: ${errors.map((issue) => issue.message).join(" ")}`);
     const presetId = typeof input.presetId === "string" && PRESETS.some((preset) => preset.presetId === input.presetId) ? input.presetId : null;
     return {
         id,

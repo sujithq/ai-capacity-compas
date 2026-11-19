@@ -22,7 +22,7 @@ test("built extension serves assets and rejects a stale interpretation request",
     t.after(async () => { other.close(); store.close(); await server.close(); });
 
     const base = new URL(server.urlFor("build-test"));
-    for (const asset of ["/", "/ui.css", "/ui.js", "/engine.mjs", "/docs.mjs", "/host.mjs", "/version.mjs", "/favicon.svg"]) {
+    for (const asset of ["/", "/ui.css", "/ui.js", "/engine.mjs", "/catalogue.mjs", "/docs.mjs", "/host.mjs", "/version.mjs", "/favicon.svg"]) {
         const response = await fetch(new URL(asset, base));
         assert.equal(response.status, 200, asset);
         assert.ok((await response.text()).length > 0, asset);

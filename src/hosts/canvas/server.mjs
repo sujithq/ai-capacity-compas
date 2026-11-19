@@ -16,6 +16,7 @@ const STATIC = {
     "/engine.mjs": ["engine.mjs", "text/javascript; charset=utf-8"],
     "/host.mjs": ["host.mjs", "text/javascript; charset=utf-8"],
     "/docs.mjs": ["docs.mjs", "text/javascript; charset=utf-8"],
+    "/catalogue.mjs": ["catalogue.mjs", "text/javascript; charset=utf-8"],
     "/version.mjs": ["version.mjs", "text/javascript; charset=utf-8"],
 };
 const MAX_BODY = 1024 * 1024;

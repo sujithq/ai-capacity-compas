@@ -13,6 +13,7 @@ const ASSETS = [
     "./presets.mjs",
     "./interpretation.mjs",
     "./docs.mjs",
+    "./catalogue.mjs",
     "./version.mjs",
 ];
 const index = new URL("./index.html", self.registration.scope).href;

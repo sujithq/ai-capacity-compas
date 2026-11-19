@@ -6,6 +6,8 @@
 // no randomness. Quota values are always caller-supplied; nothing here assumes
 // a provider, model, or universal TPM/RPM ratio.
 
+import { CATALOGUE_VERSION, CATALOGUE_VERIFIED, referenceFor, unsupportedPTUMethod, QUOTA_REFERENCE_NOTICE } from "./catalogue.mjs";
+
 export const ENGINE_VERSION = "1.0.0";
 
 /** Field metadata shared by validation and the UI form renderer. */
@@ -39,6 +41,9 @@ export const DEPLOYMENT_FIELDS = [
       help: "Free text, e.g. the cloud or API provider. Not used in calculations." },
     { key: "modelName", label: "Model name", type: "text", required: false, default: "",
       help: "Free text. Not used in calculations." },
+    { key: "modelVersion", label: "Model version", type: "text", default: "",
+      help: "Enter the exact version for catalogue matching. Leave blank for manual sizing." },
+    { key: "referenceId", label: "Documented reference", type: "text", default: "" },
     { key: "deploymentType", label: "Deployment type", type: "text", required: false, default: "",
       help: "Free text, e.g. shared, regional, global, provisioned. Not used in calculations." },
     { key: "allocatedTPM", label: "Allocated TPM", unit: "tokens/min", min: 0, required: false, default: null,
@@ -116,6 +121,9 @@ export function normalizeInputs(input = {}) {
     const workload = {};
     const deployment = {};
     const model = rawD.capacityModel ?? "quota";
+    const entry = referenceFor(rawD);
+    const unsupported = model === "ptu" ? unsupportedPTUMethod(rawD.modelName) : null;
+    const fieldSources = {};
     if (model !== "quota" && model !== "ptu") {
         issues.push({ field: "deployment.capacityModel", severity: "error", message: "Choose Quota (TPM/RPM) or Provisioned (PTU)." });
     }
@@ -129,10 +137,15 @@ export function normalizeInputs(input = {}) {
             if (model === "ptu") deployment.capacityModel = model;
         } else if (f.type === "text") {
             const v = rawD[f.key];
+            if (f.key === "referenceId" || (f.key === "modelVersion" && !v)) continue;
             deployment[f.key] = v === null || v === undefined ? "" : String(v).trim().slice(0, 200);
         } else {
-            deployment[f.key] = checkNumeric(f, rawD[f.key], issues, "deployment");
-            if (PTU_FIELDS.includes(f) && parseNumber(rawD[f.key]) === null) {
+            const documented = entry?.values[f.key];
+            const manual = parseNumber(rawD[f.key]) !== null;
+            const value = manual ? rawD[f.key] : documented;
+            deployment[f.key] = checkNumeric(f, value, issues, "deployment");
+            fieldSources[f.key] = manual ? "User-entered" : documented !== undefined ? "Documented reference" : "Not set";
+            if (PTU_FIELDS.includes(f) && value === undefined && !unsupported) {
                 issues.push({ field: `deployment.${f.key}`, severity: "warning", message: `${f.label} is not set.` });
             }
         }
@@ -151,7 +164,15 @@ export function normalizeInputs(input = {}) {
         issues.push({ field: "workload.rateLimitTokensPerRequest", severity: "warning",
             message: "Rate-limit tokens per request are lower than input + output tokens; providers usually count at least the tokens actually processed." });
     }
-    if (model !== "quota") return { workload, deployment, issues };
+    if (unsupported) issues.push({ field: "deployment.modelName", severity: "warning", message: unsupported });
+    if (rawD.referenceId && !entry) issues.push({ field: "deployment.referenceId", severity: "warning", message: "Selected reference does not match the current identity and mode. No documented values were applied." });
+    const provenance = {
+        fields: fieldSources,
+        reference: entry ? { id: entry.id, source: entry.source, version: CATALOGUE_VERSION, verified: CATALOGUE_VERIFIED,
+            supported: entry.supported, values: entry.values } : null,
+        ...(model === "quota" ? { notice: QUOTA_REFERENCE_NOTICE } : {}),
+    };
+    if (model !== "quota") return { workload, deployment, issues, provenance, unsupported };
     const effTPM = d.tpmOverride ?? d.allocatedTPM;
     if (effTPM === null) issues.push({ field: "deployment.allocatedTPM", severity: "warning", message: "No TPM quota provided: TPM utilization cannot be evaluated." });
     else if (effTPM === 0) issues.push({ field: "deployment.allocatedTPM", severity: "warning", message: "TPM quota is zero: no token capacity is available." });
@@ -164,7 +185,7 @@ export function normalizeInputs(input = {}) {
                 message: `Allocated RPM (${d.allocatedRPM}) differs from the ratio-derived value (${round(derived, 2)}); Allocated RPM is used.` });
         }
     }
-    return { workload, deployment, issues };
+    return { workload, deployment, issues, provenance, unsupported };
 }
 
 function round(n, digits = 4) {
@@ -203,11 +224,12 @@ function workloadRates(w) {
  * @param {{workload: object, deployment: object}} input
  */
 export function calculateCapacity(input) {
-    const { workload: w, deployment: d, issues } = normalizeInputs(input);
+    const { workload: w, deployment: d, issues, provenance, unsupported } = normalizeInputs(input);
     const errors = issues.filter((i) => i.severity === "error");
-    const base = { engineVersion: ENGINE_VERSION, fingerprint: fingerprintInputs({ workload: w, deployment: d }), inputs: { workload: w, deployment: d }, issues };
-    if (errors.length) {
-        return { ...base, valid: false, status: "invalid", assumptions: [], metrics: null, quota: null, utilization: null,
+    const fingerprint = fingerprintInputs({ workload: w, deployment: d, ...(provenance.reference ? { provenance } : {}) });
+    const base = { engineVersion: ENGINE_VERSION, fingerprint, inputs: { workload: w, deployment: d }, issues, provenance };
+    if (errors.length || unsupported) {
+        return { ...base, valid: false, status: unsupported ? "unsupported" : "invalid", assumptions: [], metrics: null, quota: null, utilization: null,
             shortfall: null, bottleneck: null, throughput: null };
     }
     if (d.capacityModel === "ptu") return calculateProvisioned(base, w, d);
@@ -255,6 +277,10 @@ export function calculateCapacity(input) {
     }
     assumptions.push({ id: "quota-user-supplied", text: "Quota values are user-supplied and not verified against any provider; actual availability may differ." });
     const quota = { effectiveTPM: effTPM, tpmSource, effectiveRPM: effRPM, rpmSource, rpmPer1000TPM: d.rpmPer1000TPM };
+    provenance.effectiveQuota = {
+        tpm: { allocated: "User-entered", override: "User-entered override", missing: "Not set" }[tpmSource],
+        rpm: { allocated: "User-entered", override: "User-entered override", derived: "Derived estimate", missing: "Not set" }[rpmSource],
+    };
 
     // Utilization (of full quota, at peak demand)
     const tpmU = utilization(requiredTPM, effTPM);
@@ -390,6 +416,7 @@ export const STATUS_LABELS = {
     incomplete: "Incomplete — quota missing",
     "no-demand": "No demand",
     invalid: "Invalid inputs",
+    unsupported: "Unsupported PTU sizing method",
 };
 
 export function capacityStatusLabel(result) {
