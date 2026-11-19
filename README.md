@@ -21,7 +21,7 @@ The deterministic engine, validation, presets, field documentation, briefing fac
 
 ## Run locally
 
-Requires Node.js 24 or newer. The project has no npm dependencies.
+Requires Node.js 24 or newer. CI and deployment use the latest Node.js LTS release (currently 26). The project has no npm dependencies.
 
 ```sh
 npm test
