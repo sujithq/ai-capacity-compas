@@ -1,4 +1,12 @@
 export const FIELD_DOCS = {
+    "deployment-deployedPTUs": [
+        { label: "Foundry: provisioned throughput concepts", url: "https://learn.microsoft.com/en-us/azure/foundry/openai/concepts/provisioned-throughput" },
+        { label: "Foundry: compare deployment types", url: "https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/deployment-types" },
+    ],
+    "deployment-inputTPMPerPTU": {
+        label: "Foundry: provisioned throughput sizing",
+        url: "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/provisioned-throughput-sizing",
+    },
     "workload-requestsPerUserPerMinute": [
         {
             label: "Azure OpenAI: measure requests and token throughput",

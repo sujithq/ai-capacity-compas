@@ -222,7 +222,7 @@ test("compareScenarios returns one row per scenario", () => {
 });
 
 test("all presets are valid illustrative examples", () => {
-    assert.equal(PRESETS.length, 7);
+    assert.equal(PRESETS.filter((p) => p.deployment.capacityModel === "ptu").length, 1);
     for (const p of PRESETS) {
         const r = calculateCapacity(p);
         assert.equal(r.valid, true, p.name);
@@ -248,4 +248,83 @@ test("checkInterpretation flags missing sections and rejects empty", () => {
     const full = INTERPRETATION_SECTIONS.map((h) => `## ${h}\ntext`).join("\n");
     assert.deepEqual(checkInterpretation(full).warnings, []);
     assert.equal(checkInterpretation("## Verdict\nok").warnings.length, INTERPRETATION_SECTIONS.length - 1);
+});
+
+function provisioned(deployment = {}, workload = {}) {
+    return {
+        id: "ptu-test", name: "Synthetic PTU scenario",
+        workload: { ...base().workload, concurrentUsers: 1000, requestsPerUserPerMinute: 1, peakMultiplier: 1,
+            growthMultiplier: 1, avgInputTokens: 200, avgOutputTokens: 20, targetUtilizationPct: 80, ...workload },
+        deployment: { capacityModel: "ptu", deployedPTUs: 110, inputTPMPerPTU: 3400, outputTokenRatio: 8,
+            promptCacheRatePct: 0, minimumPTUs: 0, ptuScaleIncrement: 5, ...deployment },
+    };
+}
+
+test("PTU sizing matches the documented worked example and discounts only cached input", () => {
+    const a = calculateCapacity(provisioned());
+    const b = calculateCapacity(provisioned({ promptCacheRatePct: 50 }));
+    assert.equal(a.ptu.normalizedTPM, 360000);
+    assert.equal(b.ptu.normalizedTPM, 260000);
+    close(a.ptu.requiredPTUs, 360000 / 3400);
+    close(b.ptu.requiredPTUs, 260000 / 3400);
+    assert.equal(a.ptu.roundedPTUs, 110);
+    assert.equal(b.ptu.roundedPTUs, 80);
+    assert.equal(a.ptu.roundedPTUsWithHeadroom, 135);
+    assert.equal(b.ptu.roundedPTUsWithHeadroom, 100);
+    close(a.utilization.ptu, 360000 / 374000);
+    close(a.throughput.theoreticalMaxRPM, 374000 / 360);
+    close(a.throughput.sustainableRPMAtTarget, (374000 / 360) * 0.8);
+    assert.deepEqual(a.shortfall, { ptu: 25, ptuSurplus: 0 });
+    assert.deepEqual(b.shortfall, { ptu: 0, ptuSurplus: 10 });
+    assert.notEqual(a.fingerprint, b.fingerprint);
+});
+
+test("PTU sizing distinguishes missing values, zero deployment, and minimum or step rounding", () => {
+    const calc = (deployment, workload) => calculateCapacity(provisioned(deployment, workload));
+    assert.equal(calc({ minimumPTUs: 111 }).ptu.roundedPTUs, 115);
+    assert.equal(calc({ inputTPMPerPTU: 3600 }).ptu.roundedPTUs, 100);
+    assert.equal(calc({ minimumPTUs: 11 }, { concurrentUsers: 0 }).ptu.roundedPTUs, 15);
+    assert.equal(calc({ minimumPTUs: null }).ptu.roundedPTUs, null);
+    assert.equal(calc({ deployedPTUs: null }).status, "incomplete");
+    const empty = calc({ deployedPTUs: 0 });
+    assert.equal(empty.utilization.ptuNoCapacity, true);
+    assert.equal(empty.utilization.ptu, null);
+    assert.equal(empty.throughput.theoreticalMaxRPM, 0);
+    assert.equal(empty.status, "insufficient");
+    const cached = calc({ promptCacheRatePct: 100 }, { avgOutputTokens: 0 });
+    assert.equal(cached.ptu.normalizedTPM, 0);
+    assert.equal(cached.throughput.theoreticalMaxRPM, null);
+});
+
+test("PTU validation rejects out-of-range data and ignores quota-only fields", () => {
+    for (const deployment of [{ promptCacheRatePct: -1 }, { promptCacheRatePct: 101 }, { inputTPMPerPTU: 0 },
+        { outputTokenRatio: -1 }, { ptuScaleIncrement: 0 }, { ptuScaleIncrement: 2.5 }, { minimumPTUs: -1 },
+        { deployedPTUs: Infinity }, { capacityModel: "standard" }]) {
+        assert.equal(calculateCapacity(provisioned(deployment)).valid, false, JSON.stringify(deployment));
+    }
+    assert.equal(calculateCapacity(provisioned({}, { avgInputTokens: Number.MAX_VALUE })).valid, false);
+    const ptu = calculateCapacity(provisioned({ allocatedTPM: -1 }, { rateLimitTokensPerRequest: "bad" }));
+    assert.equal(ptu.valid, true);
+    const quota = base();
+    assert.deepEqual(calculateCapacity(quota), calculateCapacity({
+        ...quota, deployment: { ...quota.deployment, capacityModel: "quota", inputTPMPerPTU: -1 },
+    }));
+});
+
+test("mixed comparison and PTU interpretation keep the capacity models distinct", () => {
+    const scenario = provisioned({ deployedPTUs: null });
+    const result = calculateCapacity(scenario);
+    const facts = buildFacts(scenario, result);
+    const rows = compareScenarios([base(), scenario]);
+    assert.equal(rows[0].capacityModel, "quota");
+    assert.equal(rows[0].ptuUtilization, null);
+    assert.equal(rows[1].capacityModel, "ptu");
+    assert.equal(rows[1].tpmUtilization, null);
+    assert.equal(rows[1].roundedPTUsWithHeadroom, 135);
+    assert.equal(facts.ptu.roundedPTUs, 110);
+    assert.deepEqual(facts.missingInputs, ["Deployed PTUs"]);
+    assert.equal(facts.primaryConstraint.primary, "PTU capacity");
+    assert.equal("quota" in facts, false);
+    assert.match(facts.sizingLimitation, /GPT-6/);
+    assert.match(buildAgentPrompt({ scenario, result }), /never invent or look up per-model PTU throughput/);
 });

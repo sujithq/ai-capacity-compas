@@ -68,6 +68,15 @@ export const PRESETS = [
             rateLimitTokensPerRequest: null, peakMultiplier: 1, growthMultiplier: 1, targetUtilizationPct: 100, avgLatencySeconds: 2 },
         deployment: { ...EXAMPLE_DEPLOYMENT, allocatedTPM: 4000000, allocatedRPM: 5000 },
     },
+    {
+        presetId: "provisioned-assistant",
+        name: "Provisioned assistant (PTU)",
+        notes: "Illustrative PTU sizing with repeated prompts. All sizing coefficients and allocation values are fictional.",
+        workload: { concurrentUsers: 300, requestsPerUserPerMinute: 2, avgInputTokens: 500, avgOutputTokens: 75,
+            rateLimitTokensPerRequest: null, peakMultiplier: 1.2, growthMultiplier: 1.1, targetUtilizationPct: 80, avgLatencySeconds: 2 },
+        deployment: { ...EXAMPLE_DEPLOYMENT, capacityModel: "ptu", deploymentType: "Example provisioned",
+            deployedPTUs: 100, inputTPMPerPTU: 4800, outputTokenRatio: 5, promptCacheRatePct: 40, minimumPTUs: 20, ptuScaleIncrement: 10 },
+    },
 ];
 
 export function getPreset(presetId) {

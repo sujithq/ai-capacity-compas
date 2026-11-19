@@ -51,7 +51,9 @@ const numOrNull = { type: ["number", "string", "null"] };
 const workloadSchema = { type: "object", additionalProperties: false,
     properties: Object.fromEntries(WORKLOAD_FIELDS.map((f) => [f.key, { ...numOrNull, description: `${f.label} (${f.unit})` }])) };
 const deploymentSchema = { type: "object", additionalProperties: false,
-    properties: Object.fromEntries(DEPLOYMENT_FIELDS.map((f) => [f.key, f.type === "text" ? { type: "string", description: f.label } : { ...numOrNull, description: `${f.label} (${f.unit})` }])) };
+    properties: Object.fromEntries(DEPLOYMENT_FIELDS.map((f) => [f.key, f.type === "choice"
+        ? { type: "string", enum: Object.keys(f.options), description: f.label }
+        : f.type === "text" ? { type: "string", description: f.label } : { ...numOrNull, description: `${f.label} (${f.unit})` }])) };
 
 const actions = [
     {

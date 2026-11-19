@@ -47,7 +47,9 @@ function cleanSection(raw, fields, current) {
     const out = { ...current };
     if (!raw || typeof raw !== "object") return out;
     for (const f of fields) {
-        if (Object.prototype.hasOwnProperty.call(raw, f.key)) out[f.key] = cleanValue(raw[f.key], f.type === "text");
+        if (Object.prototype.hasOwnProperty.call(raw, f.key)) {
+            out[f.key] = f.type === "choice" && raw[f.key] == null ? f.default : cleanValue(raw[f.key], !!f.type);
+        }
     }
     return out;
 }

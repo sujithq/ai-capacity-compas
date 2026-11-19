@@ -1,8 +1,18 @@
 # AI Capacity Compass
 
-AI Capacity Compass is a model-agnostic inference capacity planner for TPM/RPM demand, utilization, bottlenecks, and scenario comparisons. The public web app and Copilot canvas are two small hosts around the same calculation engine and dashboard.
+AI Capacity Compass is an inference capacity planner for request/token quotas and Azure-style provisioned throughput (PTU) sizing. The public web app and Copilot canvas share the same calculation engine and dashboard.
 
 > Presets are illustrative examples, not measured workloads or provider quotas. Every quota and model-specific RPM/TPM ratio is supplied by the user and is unverified.
+
+## Provisioned throughput sizing
+
+In **Deployment → Capacity model**, choose **Provisioned (PTU)**. Quota (TPM/RPM) remains the default. Enter the deployed PTUs, input TPM per PTU, output-to-input token ratio, prompt cache rate, minimum PTUs, and scale increment for your model/version and deployment type. No model-specific values are built in or verified. The **Provisioned assistant (PTU)** example uses fictional values.
+
+At peak demand, the planner discounts cached input TPM and adds output TPM weighted by the supplied ratio. It divides that normalized TPM by input TPM per PTU, then rounds up to a multiple of the scale increment at or above the minimum. The headroom estimate divides the raw requirement by the target utilization before rounding. Leave deployed PTUs blank to size a new deployment; utilization, shortfall/surplus, and RPM ceilings require a deployed or planned allocation.
+
+The RPM ceiling assumes the same request mix. Actual throughput requires benchmarking; utilization above 100% typically causes HTTP 429 responses, and spillover to standard deployments is not modeled. Quota and PTU scenarios share peak RPM and theoretical RPM columns, but their utilization and sizing metrics are shown separately.
+
+**GPT-6 and newer:** The simple ratio model does not account for the newer normalized-token method's cached-input weights, cache writes, or context-specific weights. An externally calculated effective ratio can give an approximation for a specific mix, not a faithful model. See Microsoft Learn's [PTU sizing guide](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/provisioned-throughput-sizing), [provisioned throughput concepts](https://learn.microsoft.com/en-us/azure/foundry/openai/concepts/provisioned-throughput), and [deployment types](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/deployment-types).
 
 ## Architecture
 
@@ -91,6 +101,7 @@ Web import/export uses a versioned JSON envelope compatible with the scenario da
         "avgLatencySeconds": null
       },
       "deployment": {
+          "capacityModel": "quota",
         "provider": "",
         "modelName": "",
         "deploymentType": "",
@@ -108,6 +119,8 @@ Web import/export uses a versioned JSON envelope compatible with the scenario da
 ```
 
 Imports accept only this format/version, validate every scenario's fields and values, discard unknown properties and old interpretations, and reject malformed or oversized files. Import replaces the scenarios saved in the current browser after confirmation; export a backup first if needed. The canvas stores its scenarios separately and does not send them to the website.
+
+Version 1 scenarios without `deployment.capacityModel` still load as `quota`. For PTU scenarios set it to `ptu`; the optional numeric fields are `deployedPTUs`, `inputTPMPerPTU`, `outputTokenRatio`, `promptCacheRatePct` (0–100), `minimumPTUs`, and `ptuScaleIncrement`. Use `null` or omit an unknown value. Switching modes preserves the other mode's inputs but ignores them in calculations.
 
 ## Documentation references
 

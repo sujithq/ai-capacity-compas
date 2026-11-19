@@ -3,6 +3,7 @@
 // identically to agent-facing actions.
 import {
     calculateCapacity, compareScenarios, parseNumber, WORKLOAD_FIELDS, DEPLOYMENT_FIELDS, STATUS_LABELS,
+    CAPACITY_MODELS, PTU_FIELDS, PTU_LIMITATION, capacityStatusLabel,
 } from "../core/engine.mjs";
 import { FIELD_DOCS } from "../core/docs.mjs";
 import { host } from "./host.mjs";
@@ -14,9 +15,11 @@ const SLIDERS = {
     growthMultiplier: { min: 0.5, max: 5, step: 0.1 },
 };
 const DEPLOYMENT_GROUPS = [
+    ["", ["capacityModel"]],
     ["Identification (not used in math)", ["provider", "modelName", "deploymentType"]],
-    ["Quota", ["allocatedTPM", "allocatedRPM", "rpmPer1000TPM"]],
-    ["Manual overrides", ["tpmOverride", "rpmOverride"]],
+    ["Quota", ["allocatedTPM", "allocatedRPM", "rpmPer1000TPM"], "quota"],
+    ["Manual overrides", ["tpmOverride", "rpmOverride"], "quota"],
+    ["Provisioned sizing (user-supplied)", PTU_FIELDS.map((f) => f.key), "ptu"],
 ];
 let state = null;
 let formFor = null;
@@ -126,27 +129,34 @@ function applyRemote(next) {
 }
 
 // ---------- form ----------
-function fieldHtml(section, f) {
+function fieldHtml(section, f, model) {
     const id = `${section}-${f.key}`;
     const doc = FIELD_DOCS[id];
     const slider = SLIDERS[f.key];
-    const input = `<input id="${id}" type="text" ${f.type === "text" ? "" : 'inputmode="decimal"'} data-section="${section}" data-key="${f.key}" autocomplete="off" placeholder="${f.required ? "" : f.type === "text" ? "optional" : "blank = not set"}" />`;
-    return `<div class="field" data-path="${section}.${f.key}">
+    const binding = `id="${id}" data-section="${section}" data-key="${f.key}"`;
+    const input = f.type === "choice"
+        ? `<select ${binding}>${Object.entries(f.options).map(([v, label]) => `<option value="${esc(v)}">${esc(label)}</option>`).join("")}</select>`
+        : `<input ${binding} type="text" ${f.type === "text" ? "" : 'inputmode="decimal"'} autocomplete="off" placeholder="${f.required ? "" : f.type === "text" ? "optional" : "blank = not set"}" />`;
+    const visibility = model ? ` data-capacity-mode="${model}"${model === "ptu" ? " hidden" : ""}` : "";
+    return `<div class="field" data-path="${section}.${f.key}"${visibility}>
         <label for="${id}">${esc(f.label)}${f.unit && f.unit !== "ratio" ? `<span class="unit">${esc(f.unit)}</span>` : ""}</label>
         ${slider ? `<div class="range-row"><input type="range" min="${slider.min}" max="${slider.max}" step="${slider.step}" data-range-for="${id}" aria-label="${esc(f.label)} slider" />${input}</div>` : input}
         <div class="msg"></div>
-        <div class="help">${esc(f.help)}</div>
+        ${f.help ? `<div class="help">${esc(f.help)}</div>` : ""}
         ${(Array.isArray(doc) ? doc : doc ? [doc] : []).map((link) =>
         `<div class="help"><a class="doc-link" href="${esc(link.url)}" target="_blank" rel="noopener noreferrer">${esc(link.label)}<span class="sr-only"> (opens in a new tab)</span></a></div>`).join("")}
     </div>`;
 }
 
 function buildForm() {
-    $("workload-fields").innerHTML = WORKLOAD_FIELDS.map((f) => fieldHtml("workload", f)).join("");
+    $("workload-fields").innerHTML = WORKLOAD_FIELDS.map((f) => fieldHtml("workload",
+        f.key === "targetUtilizationPct" ? { ...f, label: "Target capacity utilization", help: "Highest share of capacity to plan for; the rest is headroom." } : f,
+        f.key === "rateLimitTokensPerRequest" ? "quota" : undefined)).join("");
     const byKey = Object.fromEntries(DEPLOYMENT_FIELDS.map((f) => [f.key, f]));
-    $("deployment-fields").innerHTML = DEPLOYMENT_GROUPS.map(([label, keys]) =>
-        `<div class="group-label">${esc(label)}</div>${keys.map((k) => fieldHtml("deployment", byKey[k])).join("")}`).join("");
-    for (const el of document.querySelectorAll("[data-section]")) el.addEventListener("input", onFieldInput);
+    $("deployment-fields").innerHTML = DEPLOYMENT_GROUPS.map(([label, keys, model]) =>
+        `${label ? `<div class="group-label"${model ? ` data-capacity-mode="${model}"${model === "ptu" ? " hidden" : ""}` : ""}>${esc(label)}</div>` : ""}${keys.map((k) => fieldHtml("deployment", byKey[k], model)).join("")}`).join("");
+    $("ptu-limitation").textContent = PTU_LIMITATION;
+    for (const el of document.querySelectorAll("[data-section]")) el.addEventListener(el.tagName === "SELECT" ? "change" : "input", onFieldInput);
     for (const el of document.querySelectorAll("[data-range-for]")) {
         el.addEventListener("input", () => {
             const target = $(el.dataset.rangeFor);
@@ -167,7 +177,8 @@ function syncForm(force) {
     };
     setVal($("scenario-name"), s.name);
     setVal($("scenario-notes"), s.notes || "");
-    for (const el of document.querySelectorAll("[data-section]")) setVal(el, s[el.dataset.section][el.dataset.key]);
+    for (const el of document.querySelectorAll("[data-section]")) setVal(el, el.dataset.key === "capacityModel"
+        ? s.deployment.capacityModel ?? "quota" : s[el.dataset.section][el.dataset.key]);
     for (const el of document.querySelectorAll("[data-range-for]")) {
         const n = parseNumber($(el.dataset.rangeFor).value);
         if (Number.isFinite(n) && document.activeElement !== el) el.value = String(n);
@@ -221,6 +232,11 @@ function renderResults() {
     const s = active();
     if (!s) return;
     const r = calculateCapacity(s);
+    const mode = s.deployment.capacityModel === "ptu" ? "ptu" : "quota";
+    for (const el of document.querySelectorAll("[data-capacity-mode]")) el.hidden = el.dataset.capacityMode !== mode;
+    $("quota-help").hidden = $("quota-method").hidden = mode === "ptu";
+    $("ptu-limitation").hidden = mode !== "ptu";
+    $("token-heading").textContent = mode === "ptu" ? "Normalized token demand at peak" : "Token consumption per request";
 
     // field-level messages
     for (const el of document.querySelectorAll(".field[data-path]")) {
@@ -237,6 +253,7 @@ function renderResults() {
         $("kpis").innerHTML = ""; $("util-bars").innerHTML = ""; $("throughput").innerHTML = ""; $("tokens").innerHTML = ""; $("effective-quota").innerHTML = ""; $("assumptions").innerHTML = "";
         return;
     }
+    if (mode === "ptu") { renderProvisioned(r); return; }
     const m = r.metrics; const u = r.utilization; const t = r.throughput; const q = r.quota; const sf = r.shortfall;
     st.innerHTML = `<span>${esc(STATUS_LABELS[r.status])}</span><span class="pill">Bottleneck: ${esc(r.bottleneck.primary)}</span><span class="sub">${esc(r.bottleneck.reason)}</span>`;
 
@@ -288,6 +305,38 @@ function renderResults() {
     $("assumptions").innerHTML = r.assumptions.map((a) => `<li>${esc(a.text)}</li>`).join("") + `<li>${esc(t.note)}</li>`;
 }
 
+function renderProvisioned(r) {
+    const { metrics: m, ptu: p, utilization: u, throughput: t, shortfall: sf } = r;
+    const target = `${fmt(m.targetUtilization * 100, 1)}% target`;
+    const utilization = u.ptuNoCapacity ? "no capacity" : pct(u.ptu);
+    $("status").innerHTML = `<span>${esc(capacityStatusLabel(r))}</span><span class="pill">Constraint: PTU capacity</span><span class="sub">${esc(r.bottleneck.reason)}</span>`;
+    $("effective-quota").innerHTML = `<strong>Provisioned capacity</strong><br/>Deployed: ${fmt(p.deployedPTUs)} PTUs<br/>Normalized token budget: ${fmtBig(p.normalizedCapacity)} TPM`;
+    $("kpis").innerHTML = [
+        kpi("Peak RPM", fmt(m.peakRPM, 1), `Base ${fmt(m.baseRPM, 1)} req/min`),
+        kpi("Normalized TPM", fmtBig(p.normalizedTPM), "Uncached input + weighted output"),
+        kpi("Required PTUs", fmt(p.roundedPTUs), `${fmt(p.requiredPTUs, 2)} raw · rounded to deployment step`),
+        kpi("PTUs with headroom", fmt(p.roundedPTUsWithHeadroom), `${fmt(p.requiredPTUsWithHeadroom, 2)} raw at ${target}`),
+        kpi("PTU utilization", utilization, `of ${fmt(p.deployedPTUs)} deployed PTUs`, u.ptuNoCapacity ? "bad" : utilClass(u.ptu, m.targetUtilization)),
+        kpi(sf.ptuSurplus > 0 ? "PTU surplus" : "PTU shortfall", fmt(sf.ptuSurplus > 0 ? sf.ptuSurplus : sf.ptu),
+            "vs rounded headroom requirement", sf.ptu > 0 ? "bad" : ""),
+        kpi("Theoretical RPM ceiling", fmt(t.theoreticalMaxRPM, 1), "At full modeled capacity"),
+        kpi("Theoretical RPM at target", fmt(t.sustainableRPMAtTarget, 1), target),
+        m.estimatedInFlightRequests !== null ? kpi("In-flight requests", fmt(m.estimatedInFlightRequests, 1), "peak RPS × latency") : "",
+    ].join("");
+    const scale = Math.min(2, Math.max(1.25, (u.ptu ?? 0) * 1.05));
+    $("util-bars").innerHTML = u.ptu === null && !u.ptuNoCapacity ? '<p class="note">Set the PTU sizing inputs and deployed capacity to evaluate utilization.</p>'
+        : bar("PTU utilization", utilization, u.ptuNoCapacity ? scale : u.ptu, scale, u.ptuNoCapacity || u.ptu > 1 ? "over" : "tpm",
+            [{ at: m.targetUtilization, cls: "target", title: target }, { at: 1, title: "100% of deployed capacity" }])
+        + '<p class="note">Markers: target utilization and 100% of deployed capacity. Bars beyond 200% are clipped.</p>';
+    const rpmScale = Math.max(1, m.peakRPM, t.theoreticalMaxRPM ?? 0);
+    const rpm = (label, v, cls) => v === null ? "" : bar(label, fmt(v, 1), v, rpmScale, cls);
+    $("throughput").innerHTML = rpm("Peak demand", m.peakRPM, "rpm") + rpm("PTU ceiling", t.theoreticalMaxRPM, "tpm")
+        + rpm("At utilization target", t.sustainableRPMAtTarget, "input") + `<p class="note">${esc(t.note)}</p>`;
+    $("tokens").innerHTML = `<p class="note">Peak: ${fmtBig(m.inputTPM)} input TPM → <strong>${fmtBig(p.uncachedInputTPM)}</strong> uncached TPM.
+        ${fmtBig(m.outputTPM)} output TPM → <strong>${fmtBig(p.weightedOutputTPM)}</strong> input-equivalent TPM.</p>`;
+    $("assumptions").innerHTML = [...r.assumptions.map((a) => a.text), t.note].map((text) => `<li>${esc(text)}</li>`).join("");
+}
+
 function renderCompare() {
     const ids = state.compareIds || [];
     $("compare-picker").innerHTML = state.scenarios.map((s) =>
@@ -306,18 +355,23 @@ function renderCompare() {
         $("compare-table").innerHTML = "";
         return;
     }
-    const scale = Math.min(2, Math.max(1.1, ...rows.flatMap((r) => [r.tpmUtilization ?? 0, r.rpmUtilization ?? 0]).map((x) => x * 1.05)));
-    $("compare-chart").innerHTML = rows.map((r) => {
+    const quotaRows = rows.filter((r) => r.capacityModel === "quota");
+    const hasPTU = quotaRows.length !== rows.length;
+    const scale = Math.min(2, Math.max(1.1, ...quotaRows.flatMap((r) => [r.tpmUtilization ?? 0, r.rpmUtilization ?? 0]).map((x) => x * 1.05)));
+    $("compare-chart").innerHTML = (hasPTU ? '<p class="note">Compare peak demand and theoretical RPM ceilings across modes. Utilization and sizing use different denominators; quota bars show only Quota scenarios.</p>' : "") + (quotaRows.length ? quotaRows.map((r) => {
         const b = (v, cls) => `<div class="bar-track" title="${pct(v)}"><div class="bar-fill ${v > 1 ? "over" : cls} ${chartWidth(v === null ? 0 : Math.min(100, (v / scale) * 100))}"></div><div class="marker ${chartPosition((1 / scale) * 100)}"></div></div>`;
         return `<div class="cmp-row"><div class="name" title="${esc(r.name)}">${esc(r.name)}</div><div class="cmp-bars">${b(r.tpmUtilization, "tpm")}${b(r.rpmUtilization, "rpm")}</div></div>`;
-    }).join("") + `<div class="legend"><span><i class="tpm"></i>TPM utilization</span><span><i class="rpm"></i>RPM utilization</span><span><i class="bad"></i>over quota</span><span><i class="fg"></i>100%</span></div>`;
+    }).join("") + `<div class="legend"><span><i class="tpm"></i>TPM utilization</span><span><i class="rpm"></i>RPM utilization</span><span><i class="bad"></i>over quota</span><span><i class="fg"></i>100%</span></div>` : "");
 
     const cls = (r, v) => utilClass(v, (state.scenarios.find((s) => s.id === r.id)?.workload.targetUtilizationPct ?? 100) / 100);
-    $("compare-table").innerHTML = `<thead><tr><th>Scenario</th><th>Status</th><th>Peak RPM</th><th>Req. TPM +hr</th><th>Req. RPM +hr</th><th>TPM quota</th><th>RPM quota</th><th>TPM util</th><th>RPM util</th><th>Bottleneck</th><th>TPM shortfall</th><th>RPM shortfall</th><th>Theor. max RPM</th></tr></thead><tbody>`
+    const quotaColumns = "<th>Req. TPM +hr</th><th>Req. RPM +hr</th><th>TPM quota</th><th>RPM quota</th><th>TPM util</th><th>RPM util</th><th>Bottleneck</th><th>TPM shortfall</th><th>RPM shortfall</th>";
+    $("compare-table").innerHTML = `<thead><tr><th>Scenario</th><th>Mode</th><th>Status</th><th>Peak RPM</th><th>Theoretical max RPM</th>${hasPTU ? "<th>PTU utilization</th><th>Deployed PTUs</th><th>PTUs + headroom</th>" : ""}${quotaRows.length ? quotaColumns : ""}</tr></thead><tbody>`
         + rows.map((r) => `<tr><td><a href="#" data-select="${esc(r.id)}">${esc(r.name)}</a>${r.isExample ? ' <span class="badge">example</span>' : ""}</td>
-            <td>${esc(STATUS_LABELS[r.status] ?? r.status)}</td><td>${fmt(r.peakRPM, 1)}</td><td>${fmtBig(r.requiredTPMWithHeadroom)}</td><td>${fmt(r.requiredRPMWithHeadroom, 1)}</td>
+            <td>${CAPACITY_MODELS[r.capacityModel]}</td><td>${esc(r.statusLabel)}</td><td>${fmt(r.peakRPM, 1)}</td><td>${fmt(r.theoreticalMaxRPM, 1)}</td>
+            ${hasPTU ? `<td>${r.ptuNoCapacity ? "no capacity" : pct(r.ptuUtilization)}</td><td>${fmt(r.deployedPTUs)}</td><td>${fmt(r.roundedPTUsWithHeadroom)}</td>` : ""}
+            ${quotaRows.length ? r.capacityModel === "ptu" ? '<td colspan="9">Not applicable</td>' : `<td>${fmtBig(r.requiredTPMWithHeadroom)}</td><td>${fmt(r.requiredRPMWithHeadroom, 1)}</td>
             <td>${fmtBig(r.effectiveTPM)}</td><td>${fmt(r.effectiveRPM, 1)}</td><td class="${cls(r, r.tpmUtilization)}">${pct(r.tpmUtilization)}</td><td class="${cls(r, r.rpmUtilization)}">${pct(r.rpmUtilization)}</td>
-            <td>${esc(r.bottleneck ?? "—")}</td><td class="${r.tpmShortfall ? "bad" : ""}">${fmtBig(r.tpmShortfall)}</td><td class="${r.rpmShortfall ? "bad" : ""}">${fmt(r.rpmShortfall, 1)}</td><td>${fmt(r.theoreticalMaxRPM, 1)}</td></tr>`).join("")
+            <td>${esc(r.bottleneck ?? "—")}</td><td class="${r.tpmShortfall ? "bad" : ""}">${fmtBig(r.tpmShortfall)}</td><td class="${r.rpmShortfall ? "bad" : ""}">${fmt(r.rpmShortfall, 1)}</td>` : ""}</tr>`).join("")
         + "</tbody>";
     for (const a of $("compare-table").querySelectorAll("[data-select]")) {
         a.addEventListener("click", (e) => { e.preventDefault(); selectScenario(a.dataset.select); });
@@ -362,9 +416,11 @@ const showInput = (v) => (blank(v) ? "—" : typeof v === "number" ? new Intl.Nu
 
 /** Compare the inputs an interpretation was written for with the scenario's current inputs. */
 function inputRows(used, s) {
-    return INPUT_FIELDS.map(([section, f]) => {
-        const before = used?.[section]?.[f.key];
-        const now = s[section]?.[f.key];
+    const current = calculateCapacity(s).inputs;
+    return INPUT_FIELDS.filter(([section, f]) => f.key === "capacityModel"
+        || Object.hasOwn(current[section], f.key) || Object.hasOwn(used?.[section] ?? {}, f.key)).map(([section, f]) => {
+        const before = used?.[section]?.[f.key] ?? (f.key === "capacityModel" ? "quota" : undefined);
+        const now = current[section][f.key] ?? (f.key === "capacityModel" ? "quota" : undefined);
         const changed = !(blank(before) && blank(now)) && String(before ?? "") !== String(now ?? "");
         return { label: f.label, before, now, changed };
     });

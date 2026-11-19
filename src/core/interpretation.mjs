@@ -2,7 +2,7 @@
 // to explain. The agent never calculates: every number it may cite is in the
 // briefing's `facts`, produced deterministically by engine.mjs.
 
-import { STATUS_LABELS } from "./engine.mjs";
+import { capacityStatusLabel, PTU_FIELDS, PTU_LIMITATION } from "./engine.mjs";
 
 export const INTERPRETATION_SECTIONS = [
     "Verdict",
@@ -18,7 +18,8 @@ export const GUARDRAILS = [
     "Only cite numbers that appear in the facts. If a number you want is not there, say it is not calculated.",
     "Never invent, assume, or look up model quotas, TPM/RPM ratios, regional availability, or pricing. Quotas here are user-supplied and unverified.",
     "Treat preset/example scenarios as illustrative, not as real workload measurements.",
-    "Clearly separate theoretical quota ceilings from actual achievable throughput.",
+    "Clearly separate theoretical capacity ceilings from actual achievable throughput.",
+    "For PTU scenarios, never invent or look up per-model PTU throughput, token weights, deployment minimums, scale increments, or availability. In Missing information, ask for missing PTU inputs and confirmation of the model version, deployment type, region, and availability. Do not describe PTU capacity as a TPM/RPM quota bottleneck.",
     "Keep optimization options realistic and tied to the stated bottleneck; label any that need validation.",
 ];
 
@@ -35,19 +36,40 @@ function r(v, d = 2) {
 
 /** Facts the agent may cite (rounded for readability, derived only from engine output). */
 export function buildFacts(scenario, result) {
+    const model = result.inputs.deployment.capacityModel ?? "quota";
     const base = {
         scenario: { id: scenario.id, name: scenario.name, isExample: !!scenario.isExample, notes: scenario.notes || "" },
         deployment: {
+            capacityModel: model,
             provider: result.inputs.deployment.provider || "(not specified)",
             modelName: result.inputs.deployment.modelName || "(not specified)",
             deploymentType: result.inputs.deployment.deploymentType || "(not specified)",
         },
         inputs: result.inputs,
         status: result.status,
-        statusLabel: STATUS_LABELS[result.status] ?? result.status,
+        statusLabel: capacityStatusLabel(result) ?? result.status,
         validationIssues: result.issues,
         fingerprint: result.fingerprint,
     };
+    if (model === "ptu") {
+        const missingInputs = PTU_FIELDS.filter((f) => result.inputs.deployment[f.key] === null).map((f) => f.label);
+        const m = result.metrics;
+        return {
+            ...base,
+            missingInputs,
+            sizingLimitation: PTU_LIMITATION,
+            ...(result.valid ? {
+                demand: { baseRPM: m.baseRPM, peakRPM: m.peakRPM, peakRPS: m.peakRPS, inputTPM: m.inputTPM,
+                    outputTPM: m.outputTPM, targetUtilizationPct: pct(m.targetUtilization), estimatedInFlightRequests: m.estimatedInFlightRequests },
+                ptu: result.ptu,
+                utilizationPct: { ptu: pct(result.utilization.ptu), ptuNoCapacity: result.utilization.ptuNoCapacity },
+                primaryConstraint: result.bottleneck,
+                shortfall: result.shortfall,
+                theoreticalThroughput: result.throughput,
+                assumptions: result.assumptions.map((a) => a.text),
+            } : {}),
+        };
+    }
     if (!result.valid) return base;
     const m = result.metrics; const t = result.throughput;
     return {
@@ -107,7 +129,9 @@ export function buildAgentPrompt({ scenario, result, instanceId }) {
         ...GUARDRAILS.map((g) => `- ${g}`),
         "",
         `Write markdown with these ## sections in order: ${INTERPRETATION_SECTIONS.join(", ")}.`,
-        "Explain whether capacity is sufficient, which of TPM or RPM is the bottleneck and why, how token consumption (input, output, rate-limit accounting) drives demand, the assumptions that matter most, realistic optimizations, and what information is missing.",
+        briefing.facts.deployment.capacityModel === "ptu"
+            ? "Explain provisioned capacity, how uncached input and weighted output drive demand, raw versus rounded sizing, headroom, and what's missing. Do not infer a TPM/RPM quota bottleneck."
+            : "Explain whether capacity is sufficient, which of TPM or RPM is the bottleneck and why, how token consumption (input, output, rate-limit accounting) drives demand, the assumptions that matter most, realistic optimizations, and what information is missing.",
         "",
         `Then call invoke_canvas_action with instanceId "${instanceId}", actionName "set_interpretation" and input {"scenarioId": "${scenario.id}", "fingerprint": "${result.fingerprint}", "markdown": "..."}. Finish with a 2-3 sentence summary in chat.`,
         "",

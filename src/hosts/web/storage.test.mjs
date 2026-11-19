@@ -15,7 +15,7 @@ test("web scenarios persist locally and survive reload", () => {
     const storage = new MemoryStorage();
     const first = new WebScenarioStore(storage);
     const state = first.load();
-    assert.equal(state.scenarios.length, 7);
+    assert.ok(state.scenarios.some((s) => s.deployment.capacityModel === "ptu"));
     assert.ok(storage.getItem(STORAGE_KEY));
     const edited = first.create({ name: "Private plan" });
     first.update(edited.id, { workload: { concurrentUsers: 321 } }, JSON.stringify([edited.name, edited.notes, edited.workload, edited.deployment]));
@@ -65,6 +65,23 @@ test("import normalizes numeric strings using the canvas number parser", () => {
     const file = JSON.parse(exportScenarioState(state));
     file.scenarios[0].workload.concurrentUsers = "1,000";
     assert.equal(parseScenarioExport(JSON.stringify(file)).scenarios[0].workload.concurrentUsers, 1000);
+});
+
+test("legacy version 1 loads as quota and PTU imports validate their mode and inputs", () => {
+    const storage = new MemoryStorage();
+    const file = JSON.parse(exportScenarioState(new WebScenarioStore(storage).load()));
+    const quota = file.scenarios.find((s) => s.deployment.capacityModel !== "ptu");
+    const ptu = file.scenarios.find((s) => s.deployment.capacityModel === "ptu");
+    for (const key of ["capacityModel", "deployedPTUs", "inputTPMPerPTU", "outputTokenRatio", "promptCacheRatePct", "minimumPTUs", "ptuScaleIncrement"]) delete quota.deployment[key];
+    storage.setItem(STORAGE_KEY, JSON.stringify({ ...file, scenarios: [quota] }));
+    assert.equal(calculateCapacity(new WebScenarioStore(storage).load().scenarios[0]).ptu, undefined);
+    const restored = parseScenarioExport(JSON.stringify(file));
+    assert.equal(restored.scenarios.find((s) => s.id === quota.id).deployment.capacityModel, "quota");
+    assert.equal(calculateCapacity(restored.scenarios.find((s) => s.id === ptu.id)).ptu.deployedPTUs, ptu.deployment.deployedPTUs);
+    ptu.deployment.promptCacheRatePct = 101;
+    assert.throws(() => parseScenarioExport(JSON.stringify(file)), /Prompt cache rate/);
+    ptu.deployment.capacityModel = "__proto__";
+    assert.throws(() => parseScenarioExport(JSON.stringify(file)), /capacityModel/);
 });
 
 test("web briefing includes the same calculated facts and guardrails as the canvas", () => {

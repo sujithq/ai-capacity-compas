@@ -22,7 +22,12 @@ function safeSection(value, fields, label) {
     const output = {};
     for (const field of fields) {
         const input = value[field.key];
-        if (field.type === "text") {
+        if (field.type === "choice") {
+            if (input != null && (typeof input !== "string" || !Object.hasOwn(field.options, input))) {
+                throw new Error(`${label}.${field.key} must be ${Object.keys(field.options).join(" or ")}.`);
+            }
+            output[field.key] = input ?? field.default;
+        } else if (field.type === "text") {
             output[field.key] = safeText(input, 200);
         } else if (input === null || input === undefined || (typeof input === "string" && input.trim() === "")) {
             output[field.key] = null;

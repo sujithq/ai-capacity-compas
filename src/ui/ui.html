@@ -13,7 +13,7 @@
             <span class="logo" aria-hidden="true">🧭</span>
             <div>
                 <h1>AI Capacity Compass</h1>
-                <p class="muted small">Deterministic TPM / RPM capacity planning for AI inference</p>
+                <p class="muted small">Deterministic quota and provisioned capacity planning for AI inference</p>
                 <p id="app-version" class="muted small"></p>
             </div>
         </div>
@@ -43,7 +43,7 @@
     </header>
 
     <div id="example-banner" class="banner info" hidden>
-        <strong>Illustrative example.</strong> Preset values are placeholders to demonstrate capacity shapes — not real workload measurements or provider quotas. Edit them freely.
+        <strong>Illustrative example.</strong> Preset values are placeholders, not real workload measurements, quotas, or model sizing values. Edit them freely.
     </div>
     <div id="conn-banner" class="banner warn" hidden>Reconnecting to the canvas server…</div>
     <div id="save-error" class="banner warn" role="alert" hidden>
@@ -68,9 +68,10 @@
             </article>
             <article class="card">
                 <h2>Deployment</h2>
-                <p class="muted small">Quotas are user-supplied. There is no universal TPM/RPM ratio — use your provider's documented values for this model and deployment type.</p>
-                <p class="muted small">Azure OpenAI / Foundry documentation links below are references only. Check your model version, deployment type and subscription. No quota values are imported or verified automatically.</p>
+                <p class="muted small" id="quota-help">Quotas are user-supplied. There is no universal TPM/RPM ratio — use your provider's documented values for this model and deployment type.</p>
+                <p class="muted small">Azure OpenAI / Foundry documentation links below are references only. Check your model version, deployment type and subscription. No capacity values are imported or verified automatically.</p>
                 <div id="deployment-fields" class="fields"></div>
+                <p id="ptu-limitation" class="note" hidden></p>
                 <div id="effective-quota" class="quota-readout"></div>
             </article>
         </section>
@@ -86,7 +87,7 @@
                 <div id="util-bars"></div>
                 <h3>Demand vs theoretical ceiling</h3>
                 <div id="throughput"></div>
-                <h3>Token consumption per request</h3>
+                <h3 id="token-heading">Token consumption per request</h3>
                 <div id="tokens"></div>
             </article>
             <article id="interpretation-card" class="card">
@@ -110,7 +111,7 @@
             <details class="card assumptions">
                 <summary><h2>Assumptions &amp; method</h2></summary>
                 <ul id="assumptions"></ul>
-                <ul class="muted small method">
+                <ul id="quota-method" class="muted small method">
                     <li>Peak RPM = users × requests/user/min × peak × growth. Peak RPS = Peak RPM ÷ 60.</li>
                     <li>Required TPM = Peak RPM × rate-limit tokens per request. Headroom values divide by target utilization.</li>
                     <li>Utilization = requirement ÷ effective quota. The bottleneck is the dimension with the higher utilization.</li>

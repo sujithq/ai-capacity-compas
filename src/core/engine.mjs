@@ -30,7 +30,11 @@ export const WORKLOAD_FIELDS = [
       help: "Used only to estimate in-flight requests (Little's law). Does not change quota math." },
 ];
 
+export const CAPACITY_MODELS = { quota: "Quota (TPM/RPM)", ptu: "Provisioned (PTU)" };
+export const PTU_LIMITATION = "GPT-6 and newer models use normalized-token sizing with cached input, cache writes, and context-specific weights. This planner does not model that method. An externally calculated effective ratio is only an approximation.";
+
 export const DEPLOYMENT_FIELDS = [
+    { key: "capacityModel", type: "choice", label: "Capacity model", options: CAPACITY_MODELS, default: "quota" },
     { key: "provider", label: "Provider", type: "text", required: false, default: "",
       help: "Free text, e.g. the cloud or API provider. Not used in calculations." },
     { key: "modelName", label: "Model name", type: "text", required: false, default: "",
@@ -49,7 +53,17 @@ export const DEPLOYMENT_FIELDS = [
       help: "Wins over Allocated RPM and the derived value." },
 ];
 
-const NUMERIC_FIELDS = [...WORKLOAD_FIELDS, ...DEPLOYMENT_FIELDS].filter((f) => f.type !== "text");
+export const PTU_FIELDS = [
+    { key: "deployedPTUs", label: "Deployed PTUs", unit: "PTUs", min: 0, integer: true, help: "Blank sizes demand without assessing a deployment; zero means no deployed capacity." },
+    { key: "inputTPMPerPTU", label: "Input TPM per PTU", unit: "tokens/min/PTU", min: 0, minExclusive: true, help: "Use the documented throughput for the exact model and deployment type." },
+    { key: "outputTokenRatio", label: "Output-to-input token ratio", unit: "ratio", min: 0, minExclusive: true, help: "Input-equivalent tokens consumed by one output token." },
+    { key: "promptCacheRatePct", label: "Prompt cache rate", unit: "%", min: 0, max: 100, help: "Share of input tokens served from cache. Enter 0 for no cache." },
+    { key: "minimumPTUs", label: "Minimum PTUs", unit: "PTUs", min: 0, integer: true, help: "Enter the documented minimum, or 0 if no minimum applies." },
+    { key: "ptuScaleIncrement", label: "PTU scale increment", unit: "PTUs", min: 1, integer: true, help: "Deployment size rounds up to a multiple of this step, at or above the minimum." },
+].map((f) => ({ ...f, default: null }));
+const QUOTA_KEYS = new Set(["allocatedTPM", "allocatedRPM", "rpmPer1000TPM", "tpmOverride", "rpmOverride"]);
+DEPLOYMENT_FIELDS.push(...PTU_FIELDS);
+const NUMERIC_FIELDS = [...WORKLOAD_FIELDS, ...DEPLOYMENT_FIELDS].filter((f) => !f.type);
 const EPS = 1e-9;
 
 /** Parse a user-supplied value into a number, null (blank) or NaN (invalid). */
@@ -84,6 +98,10 @@ function checkNumeric(field, raw, issues, section) {
         issues.push({ field: path, severity: "error", message: `${field.label} must be at most ${field.max}.` });
         return null;
     }
+    if (field.integer && !Number.isSafeInteger(v)) {
+        issues.push({ field: path, severity: "error", message: `${field.label} must be a whole number within the supported range.` });
+        return null;
+    }
     return v;
 }
 
@@ -97,13 +115,26 @@ export function normalizeInputs(input = {}) {
     const rawD = (input && typeof input.deployment === "object" && input.deployment) || {};
     const workload = {};
     const deployment = {};
-    for (const f of WORKLOAD_FIELDS) workload[f.key] = checkNumeric(f, rawW[f.key], issues, "workload");
+    const model = rawD.capacityModel ?? "quota";
+    if (model !== "quota" && model !== "ptu") {
+        issues.push({ field: "deployment.capacityModel", severity: "error", message: "Choose Quota (TPM/RPM) or Provisioned (PTU)." });
+    }
+    for (const f of WORKLOAD_FIELDS) {
+        if (model === "ptu" && f.key === "rateLimitTokensPerRequest") continue;
+        workload[f.key] = checkNumeric(f, rawW[f.key], issues, "workload");
+    }
     for (const f of DEPLOYMENT_FIELDS) {
-        if (f.type === "text") {
+        if (PTU_FIELDS.includes(f) ? model !== "ptu" : model === "ptu" && QUOTA_KEYS.has(f.key)) continue;
+        if (f.type === "choice") {
+            if (model === "ptu") deployment.capacityModel = model;
+        } else if (f.type === "text") {
             const v = rawD[f.key];
             deployment[f.key] = v === null || v === undefined ? "" : String(v).trim().slice(0, 200);
         } else {
             deployment[f.key] = checkNumeric(f, rawD[f.key], issues, "deployment");
+            if (PTU_FIELDS.includes(f) && parseNumber(rawD[f.key]) === null) {
+                issues.push({ field: `deployment.${f.key}`, severity: "warning", message: `${f.label} is not set.` });
+            }
         }
     }
 
@@ -120,6 +151,7 @@ export function normalizeInputs(input = {}) {
         issues.push({ field: "workload.rateLimitTokensPerRequest", severity: "warning",
             message: "Rate-limit tokens per request are lower than input + output tokens; providers usually count at least the tokens actually processed." });
     }
+    if (model !== "quota") return { workload, deployment, issues };
     const effTPM = d.tpmOverride ?? d.allocatedTPM;
     if (effTPM === null) issues.push({ field: "deployment.allocatedTPM", severity: "warning", message: "No TPM quota provided: TPM utilization cannot be evaluated." });
     else if (effTPM === 0) issues.push({ field: "deployment.allocatedTPM", severity: "warning", message: "TPM quota is zero: no token capacity is available." });
@@ -158,6 +190,14 @@ function finite(n) {
     return n === null || n === undefined || !Number.isFinite(n) ? null : n;
 }
 
+function workloadRates(w) {
+    const demandFactor = w.requestsPerUserPerMinute * w.peakMultiplier * w.growthMultiplier;
+    const baseRPM = w.concurrentUsers * w.requestsPerUserPerMinute;
+    const peakRPM = w.concurrentUsers * demandFactor;
+    return { demandFactor, baseRPM, peakRPM, peakRPS: peakRPM / 60,
+        inputTPM: peakRPM * w.avgInputTokens, outputTPM: peakRPM * w.avgOutputTokens };
+}
+
 /**
  * Deterministic capacity calculation for one scenario.
  * @param {{workload: object, deployment: object}} input
@@ -170,6 +210,7 @@ export function calculateCapacity(input) {
         return { ...base, valid: false, status: "invalid", assumptions: [], metrics: null, quota: null, utilization: null,
             shortfall: null, bottleneck: null, throughput: null };
     }
+    if (d.capacityModel === "ptu") return calculateProvisioned(base, w, d);
 
     const assumptions = [];
     const target = w.targetUtilizationPct / 100;
@@ -179,10 +220,7 @@ export function calculateCapacity(input) {
     if (rlDefaulted) assumptions.push({ id: "rl-tokens-default", text: "Rate-limit tokens per request not provided; assumed equal to input + output tokens. Providers that reserve max output tokens will count more." });
     else assumptions.push({ id: "rl-tokens-explicit", text: `TPM demand uses ${rateLimitTokensPerRequest} rate-limit tokens per request (vs ${actualTokensPerRequest} actually processed).` });
 
-    const demandFactor = w.requestsPerUserPerMinute * w.peakMultiplier * w.growthMultiplier;
-    const baseRPM = w.concurrentUsers * w.requestsPerUserPerMinute;
-    const peakRPM = w.concurrentUsers * demandFactor;
-    const peakRPS = peakRPM / 60;
+    const { demandFactor, baseRPM, peakRPM, peakRPS, inputTPM, outputTPM } = workloadRates(w);
     const requiredTPM = peakRPM * rateLimitTokensPerRequest;
     const processedTPM = peakRPM * actualTokensPerRequest;
     const metrics = {
@@ -191,8 +229,8 @@ export function calculateCapacity(input) {
         peakRPS,
         actualTokensPerRequest,
         rateLimitTokensPerRequest,
-        inputTPM: peakRPM * w.avgInputTokens,
-        outputTPM: peakRPM * w.avgOutputTokens,
+        inputTPM,
+        outputTPM,
         processedTPM,
         requiredTPM,
         requiredTPMWithHeadroom: requiredTPM / target,
@@ -291,6 +329,60 @@ export function calculateCapacity(input) {
     return { ...base, valid: true, status, assumptions, metrics, quota, utilization: util, shortfall, bottleneck, throughput };
 }
 
+function calculateProvisioned(base, w, d) {
+    const target = w.targetUtilizationPct / 100;
+    const { baseRPM, peakRPM, peakRPS, inputTPM, outputTPM } = workloadRates(w);
+    const uncached = d.promptCacheRatePct === null ? null : (100 - d.promptCacheRatePct) / 100;
+    const uncachedInputTPM = uncached === null ? null : inputTPM * uncached;
+    const weightedOutputTPM = d.outputTokenRatio === null ? null : outputTPM * d.outputTokenRatio;
+    const cost = uncached === null || d.outputTokenRatio === null ? null : w.avgInputTokens * uncached + w.avgOutputTokens * d.outputTokenRatio;
+    const normalizedTPM = uncachedInputTPM === null || weightedOutputTPM === null ? null : uncachedInputTPM + weightedOutputTPM;
+    const requiredPTUs = normalizedTPM === null || d.inputTPMPerPTU === null ? null : normalizedTPM / d.inputTPMPerPTU;
+    const requiredPTUsWithHeadroom = requiredPTUs === null ? null : requiredPTUs / target;
+    const deployable = (raw) => {
+        if (raw === null || d.minimumPTUs === null || d.ptuScaleIncrement === null) return null;
+        const minimum = Math.max(raw, d.minimumPTUs);
+        if (minimum === 0) return 0;
+        const steps = minimum / d.ptuScaleIncrement;
+        const nearest = Math.round(steps);
+        const count = nearest > 0 && Math.abs(steps - nearest) <= Number.EPSILON * steps * 2 ? nearest : Math.ceil(steps);
+        return Math.max(1, count) * d.ptuScaleIncrement;
+    };
+    const roundedPTUs = deployable(requiredPTUs);
+    const roundedPTUsWithHeadroom = deployable(requiredPTUsWithHeadroom);
+    const deployed = d.deployedPTUs;
+    const ptuNoCapacity = deployed === 0 && requiredPTUs > 0;
+    const ptuUtil = requiredPTUs === null || deployed === null || ptuNoCapacity ? null : deployed === 0 ? 0 : requiredPTUs / deployed;
+    const delta = roundedPTUsWithHeadroom === null || deployed === null ? null : deployed - roundedPTUsWithHeadroom;
+    const normalizedCapacity = deployed === null || d.inputTPMPerPTU === null ? null : deployed * d.inputTPMPerPTU;
+    const theoreticalMaxRPM = normalizedCapacity === null || cost === null ? null : deployed === 0 ? 0 : cost > 0 ? normalizedCapacity / cost : null;
+    const sustainableRPMAtTarget = theoreticalMaxRPM === null ? null : theoreticalMaxRPM * target;
+    const metrics = { baseRPM, peakRPM, peakRPS, inputTPM, outputTPM, targetUtilization: target,
+        estimatedInFlightRequests: w.avgLatencySeconds === null ? null : peakRPS * w.avgLatencySeconds };
+    const ptu = { deployedPTUs: deployed, uncachedInputTPM, weightedOutputTPM, normalizedTPM, normalizedCapacity,
+        requiredPTUs, roundedPTUs, requiredPTUsWithHeadroom, roundedPTUsWithHeadroom };
+    if ([...Object.values(metrics), ...Object.values(ptu), cost, ptuUtil === null ? null : ptuUtil * 1000, theoreticalMaxRPM].some((v) => v !== null && !Number.isFinite(v))
+        || [roundedPTUs, roundedPTUsWithHeadroom].some((v) => v !== null && !Number.isSafeInteger(v))) {
+        return { ...base, issues: [...base.issues, { field: "deployment.capacityModel", severity: "error", message: "PTU sizing exceeds the supported numeric range." }],
+            valid: false, status: "invalid", assumptions: [], metrics: null, quota: null, utilization: null, shortfall: null, bottleneck: null, throughput: null };
+    }
+    const complete = delta !== null;
+    const status = peakRPM === 0 ? "no-demand" : ptuNoCapacity || (ptuUtil ?? 0) > 1 + EPS ? "insufficient"
+        : !complete ? "incomplete" : delta < 0 ? "at-risk" : "sufficient";
+    return { ...base, valid: true, status, metrics, ptu, quota: null, utilization: { ptu: ptuUtil, ptuNoCapacity, target },
+        shortfall: { ptu: delta === null ? null : Math.max(0, -delta), ptuSurplus: delta === null ? null : Math.max(0, delta) },
+        throughput: { kind: "theoretical", theoreticalMaxRPM, sustainableRPMAtTarget,
+            note: "Theoretical PTU ceiling for this request mix, not achieved throughput. A zero normalized token cost cannot establish a finite ceiling. Benchmark representative traffic." },
+        bottleneck: { primary: "PTU capacity", complete, reason: "Provisioned capacity depends on the normalized token mix and deployed PTUs, not separate TPM/RPM quotas." },
+        assumptions: [
+            { id: "ptu-token-mix", text: "Normalized TPM = uncached input TPM + output TPM weighted by the supplied ratio. Peak and growth multipliers apply to request demand." },
+            { id: "ptu-rounding", text: "Sizing rounds up to a supported increment at or above the minimum, even at zero demand. Shortfall or surplus is measured against the rounded headroom requirement." },
+            { id: "ptu-throttling", text: "Utilization above 100% typically results in HTTP 429 responses. Spillover to standard deployments is not modeled." },
+            { id: "ptu-availability", text: "Verify model/version, deployment type, region, minimums, increments, and availability with the provider. No values are inferred." },
+            { id: "ptu-gpt6", text: PTU_LIMITATION },
+        ] };
+}
+
 export const STATUS_LABELS = {
     sufficient: "Sufficient capacity",
     "at-risk": "Within quota, above target utilization",
@@ -299,6 +391,14 @@ export const STATUS_LABELS = {
     "no-demand": "No demand",
     invalid: "Invalid inputs",
 };
+
+export function capacityStatusLabel(result) {
+    if (result.inputs.deployment.capacityModel === "ptu") {
+        if (result.status === "incomplete") return "Incomplete — PTU inputs missing";
+        if (result.status === "at-risk") return "Within deployed capacity, below recommended PTUs";
+    }
+    return STATUS_LABELS[result.status];
+}
 
 /** Compact, deterministic side-by-side comparison of several scenarios. */
 export function compareScenarios(scenarios) {
@@ -309,6 +409,8 @@ export function compareScenarios(scenarios) {
             name: s.name ?? null,
             isExample: !!s.isExample,
             status: r.status,
+            statusLabel: capacityStatusLabel(r),
+            capacityModel: r.inputs.deployment.capacityModel ?? "quota",
             valid: r.valid,
             peakRPM: r.metrics?.peakRPM ?? null,
             peakRPS: r.metrics?.peakRPS ?? null,
@@ -323,6 +425,10 @@ export function compareScenarios(scenarios) {
             tpmShortfall: r.shortfall?.tpm ?? null,
             rpmShortfall: r.shortfall?.rpm ?? null,
             theoreticalMaxRPM: r.throughput?.theoreticalMaxRPM ?? null,
+            ptuUtilization: r.utilization?.ptu ?? null,
+            ptuNoCapacity: r.utilization?.ptuNoCapacity ?? false,
+            deployedPTUs: r.ptu?.deployedPTUs ?? null,
+            roundedPTUsWithHeadroom: r.ptu?.roundedPTUsWithHeadroom ?? null,
         };
     });
 }
