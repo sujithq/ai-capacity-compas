@@ -16,13 +16,13 @@ The RPM ceiling assumes the same request mix. Actual throughput requires benchma
 
 ## Architecture
 
-### Documented reference catalogue
+### Microsoft Learn reference catalogue
 
-In the Deployment panel, choose a **Microsoft Learn reference**, then select **Use selected reference**. The selection sets the exact provider, model, version, and deployment type shown in the picker. It supplies calculation defaults only for blank sizing fields; existing fields are never replaced. Editing the identity to a different combination stops the reference from applying. Select **Manual inputs / no reference** and **Clear reference** to disable it.
+In the Deployment panel, choose a **Microsoft Learn reference**, then select **Use selected reference**. The selection sets the provider and model, and the version and deployment type when the record specifies them. References supply sizing defaults only for blank inputs; manual sizing inputs are never replaced. Editing the identity so it no longer matches the selected reference stops it from applying. Select **Manual inputs / no reference** and **Clear reference** to disable it.
 
-The bundled Azure OpenAI snapshot (`2026-11-19.1`, verified November 19, 2026) covers 18 versioned text models across Global, Data Zone, and Regional Provisioned, plus six exact `gpt-chat-latest` version/deployment combinations with explicitly documented quota conversion ratios. GPT-6+ and GPT-image variants use different sizing methods and produce no PTU estimate. Unlisted combinations stay manual; generic capacity-unit examples, unversioned PTU rows, and tier ceilings are not used to infer missing records.
+The bundled Azure OpenAI snapshot (`2026-11-19.2`, verified November 19, 2026) covers 18 versioned text models across Global, Data Zone, and Regional Provisioned. GPT-6+ and GPT-image variants use different sizing methods and produce no PTU estimate. Quota matching prefers a version-specific documented ratio, then a documented model-level capacity unit, then a ratio **Derived from published tier limits** for the selected deployment type. The unit table does not specify versions or deployment types; tier-derived ratios do not specify versions. Ratios can differ by version: for Global Standard `gpt-chat-latest`, Microsoft documents 10 RPM per 1,000 TPM for the May/June 2026 versions and 1 for the August/October versions.
 
-Sources: [PTU parameters](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/provisioned-throughput-sizing), [quota management](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/quota), and [explicit quota-tier conversion ratios](https://learn.microsoft.com/en-us/azure/foundry/openai/quotas-limits#quota-tier-reference). The catalogue is offline, not live, and neither verifies availability nor sets assigned TPM/RPM or deployed PTUs. With user-entered TPM and blank RPM, a documented or manual ratio yields a **derived estimate**; explicit RPM and overrides remain authoritative. Recheck the documentation and your actual allocation in Foundry before making deployment decisions.
+Sources: [PTU parameters](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/provisioned-throughput-sizing), [quota guide capacity units](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/quota#understanding-rate-limits), and [quota tiers and version-specific ratios](https://learn.microsoft.com/en-us/azure/foundry/openai/quotas-limits#quota-tier-reference). Tier-derived ratios use `RPM ÷ TPM × 1,000` and are included only when every published tier for the model and Standard deployment type agrees. Rows using per-10-second request counts, missing TPM, or non-text-token limits are excluded; embeddings are included only where both per-minute limits are published. The offline catalogue neither verifies availability nor sets assigned TPM/RPM or deployed PTUs. With user-entered TPM and blank RPM, a reference or manual ratio yields a **derived RPM estimate**; explicit RPM and overrides win. Recheck Learn and your actual allocation in Foundry.
 
 ### Shared hosts
 
@@ -132,7 +132,7 @@ Imports accept only this format/version, validate every scenario's fields and va
 
 Version 1 scenarios without `deployment.capacityModel` still load as `quota`. For PTU scenarios set it to `ptu`; the optional numeric fields are `deployedPTUs`, `inputTPMPerPTU`, `outputTokenRatio`, `promptCacheRatePct` (0–100), `minimumPTUs`, and `ptuScaleIncrement`. Use `null` or omit an unknown value. Switching modes preserves the other mode's inputs but ignores them in calculations.
 
-The optional `deployment.modelVersion` and `deployment.referenceId` keep the selected catalogue identity. Export stores the reference ID, not copied coefficients. On import, it is applied only if it resolves to an exact identity and mode in the installed catalogue. A later catalogue update can therefore revise the documented defaults; manual values remain unchanged.
+The optional `deployment.modelVersion` and `deployment.referenceId` retain the selected catalogue identity. Export stores the reference ID, not copied coefficients. On import, the reference applies only when it is the best match for the mode and identity fields its source specifies. A later catalogue update can revise reference defaults; manual values remain unchanged.
 
 ## Documentation references
 

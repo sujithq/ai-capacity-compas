@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { calculateCapacity, compareScenarios, parseNumber, fingerprintInputs, normalizeInputs } from "./engine.mjs";
 import { PRESETS } from "./presets.mjs";
 import { buildAgentPrompt, buildFacts, checkInterpretation, INTERPRETATION_SECTIONS } from "./interpretation.mjs";
+import { CATALOGUE, DOCUMENTED, TIER_DERIVED, matchReference, referenceFor, referenceIdentity, consistentTierRatio } from "./catalogue.mjs";
 
 const close = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) <= eps * Math.max(1, Math.abs(b)), `${a} ≉ ${b}`);
 
@@ -383,4 +384,60 @@ test("known unsupported PTU methods cannot produce estimates even with manual co
         assert.equal(buildFacts(provisioned(), r).statusLabel, "Unsupported PTU sizing method");
     }
     assert.equal(calculateCapacity(provisioned({ modelName: "Unknown model" })).valid, true);
+});
+
+test("quota references respect version, source precedence, and deployment scope", () => {
+    const lookup = (modelName, modelVersion, deploymentType = "GlobalStandard") =>
+        ({ provider: "Azure OpenAI", modelName, modelVersion, deploymentType });
+    const exact = matchReference(lookup("gpt-chat-latest", "2026-05-05"));
+    assert.equal(exact.provenance, DOCUMENTED);
+    assert.equal(exact.values.rpmPer1000TPM, 10);
+    assert.equal(matchReference(lookup("gpt-chat-latest", "2026-10-07")).values.rpmPer1000TPM, 1);
+    assert.equal(matchReference(lookup("gpt-chat-latest", "")), undefined);
+    const o1 = lookup("o1", "some-version", "DataZoneStandard");
+    const tier = CATALOGUE.find((entry) => entry.id === "quota:o1::data-zone-standard");
+    const documented = matchReference(o1);
+    assert.equal(tier.provenance, TIER_DERIVED);
+    assert.equal(documented.provenance, DOCUMENTED);
+    assert.equal(documented.values.rpmPer1000TPM, 1 / 6);
+    assert.deepEqual(referenceIdentity(documented, o1), o1);
+    assert.equal(referenceFor({ ...o1, referenceId: tier.id }), undefined);
+    assert.equal(matchReference(lookup("o1-preview", "", "")).values.rpmPer1000TPM, 1 / 6);
+    assert.equal(matchReference(lookup("Older chat models", "")), undefined);
+    assert.equal(matchReference(lookup("gpt-5.4", "any-version", "Standard")), undefined);
+    assert.equal(matchReference(lookup("gpt-5.4", "any-version", "DataZoneStandard")).values.rpmPer1000TPM, 1);
+    assert.equal(matchReference(lookup("gpt-5.4", "any-version")).values.rpmPer1000TPM, 10);
+});
+
+test("tier ratio consistency excludes missing, differently timed, and conflicting rates", () => {
+    assert.equal(consistentTierRatio([1, 1, 1]), 1);
+    for (const ratios of [[], [null], [1, null], [1, 10], [0], [Infinity]]) {
+        assert.equal(consistentTierRatio(ratios), null);
+    }
+    const lookup = (modelName, deploymentType) => matchReference({ provider: "Azure OpenAI", modelName, deploymentType });
+    assert.equal(lookup("gpt-4o", "DataZoneStandard"), undefined);
+    assert.equal(lookup("gpt-image-2", "GlobalStandard"), undefined);
+    assert.equal(lookup("text-embedding-3-small", "GlobalStandard"), undefined);
+    assert.equal(lookup("text-embedding-3-small", "DataZoneStandard").provenance, TIER_DERIVED);
+});
+
+test("tier-derived references label the ratio without setting assigned quota", () => {
+    const deployment = { provider: "Azure OpenAI", modelName: "gpt-4.1", modelVersion: "custom-version",
+        deploymentType: "GlobalStandard", allocatedTPM: null, allocatedRPM: null, rpmPer1000TPM: null };
+    const calc = (fields) => calculateCapacity(withD({ ...deployment, ...fields }));
+    const referenceId = matchReference(deployment).id;
+    assert.equal(calc({ allocatedTPM: 24000 }).quota.effectiveRPM, null);
+    const noAllocation = calc({ referenceId });
+    assert.equal(noAllocation.quota.effectiveTPM, null);
+    assert.equal(noAllocation.quota.effectiveRPM, null);
+    const result = calc({ referenceId, allocatedTPM: 24000 });
+    assert.equal(result.inputs.deployment.allocatedRPM, null);
+    assert.equal(result.quota.effectiveRPM, 24);
+    const facts = buildFacts(withD(deployment), result);
+    assert.equal(facts.provenance.fields.rpmPer1000TPM, TIER_DERIVED);
+    assert.equal(facts.provenance.reference.kind, TIER_DERIVED);
+    assert.equal(facts.provenance.effectiveQuota.rpm, "Derived estimate");
+    assert.match(buildAgentPrompt({ scenario: withD(deployment), result }), /Derived from published tier limits/);
+    assert.equal(calc({ referenceId, allocatedTPM: 24000, allocatedRPM: 60 }).quota.effectiveRPM, 60);
+    assert.equal(calc({ referenceId, allocatedTPM: 24000, rpmPer1000TPM: 3 }).quota.effectiveRPM, 72);
 });

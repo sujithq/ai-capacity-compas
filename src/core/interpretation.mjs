@@ -20,7 +20,7 @@ export const GUARDRAILS = [
     "Treat preset/example scenarios as illustrative, not as real workload measurements.",
     "Clearly separate theoretical capacity ceilings from actual achievable throughput.",
     "For PTU scenarios, never invent or look up per-model PTU throughput, token weights, deployment minimums, scale increments, or availability. In Missing information, ask for missing PTU inputs and confirmation of the model version, deployment type, region, and availability. Do not describe PTU capacity as a TPM/RPM quota bottleneck.",
-    "Distinguish documented catalogue references, user-entered values and derived estimates. A dated reference may change and is not assigned quota or confirmed availability. Never infer assigned TPM or RPM from a published quota ceiling.",
+    "Distinguish explicitly documented ratios from ratios derived from published tier limits, user-entered values, and RPM estimates calculated from user-entered TPM. A reference can vary by model version and is not assigned quota or confirmed availability. Never infer assigned TPM or RPM from a published quota ceiling.",
     "Keep optimization options realistic and tied to the stated bottleneck; label any that need validation.",
 ];
 

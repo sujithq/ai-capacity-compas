@@ -6,7 +6,7 @@ import {
     CAPACITY_MODELS, PTU_FIELDS, PTU_LIMITATION, capacityStatusLabel,
 } from "../core/engine.mjs";
 import { FIELD_DOCS } from "../core/docs.mjs";
-import { CATALOGUE, CATALOGUE_VERIFIED, CATALOGUE_VERSION, matchReference, QUOTA_GUIDE, PTU_SOURCE, QUOTA_REFERENCE_NOTICE } from "../core/catalogue.mjs";
+import { CATALOGUE, CATALOGUE_VERIFIED, CATALOGUE_VERSION, matchReference, referenceIdentity, QUOTA_GUIDE, PTU_SOURCE, QUOTA_REFERENCE_NOTICE } from "../core/catalogue.mjs";
 import { host } from "./host.mjs";
 import { APP_VERSION } from "./version.mjs";
 
@@ -166,8 +166,8 @@ function buildForm() {
         const id = $("reference-picker").value;
         const entry = CATALOGUE.find((row) => row.id === id && row.mode === (s.deployment.capacityModel ?? "quota"));
         if (entry) {
-            const { provider, modelName, modelVersion, deploymentType } = entry;
-            Object.assign(s.deployment, { provider, modelName, modelVersion, deploymentType, referenceId: id });
+            const identity = referenceIdentity(entry, s.deployment);
+            Object.assign(s.deployment, identity, { referenceId: matchReference({ ...s.deployment, ...identity }).id });
         } else if (id === "manual") {
             s.deployment.referenceId = "";
         } else return;
@@ -196,11 +196,14 @@ function renderReference(s, r, mode) {
     const picker = $("reference-picker");
     const match = matchReference(s.deployment);
     const ref = r.provenance.reference;
-    const option = (entry) => `<option value="${esc(entry.id)}">${esc(`${entry.provider} / ${entry.modelName} / ${entry.modelVersion} / ${entry.deploymentType}${entry.supported ? "" : " (unsupported)"}`)}</option>`;
+    const option = (entry) => {
+        const identity = [entry.modelName, entry.modelVersion || "version not specified", entry.deploymentType].filter(Boolean).join(" / ");
+        return `<option value="${esc(entry.id)}">${esc(`${identity} — ${entry.supported ? entry.provenance : "unsupported"}`)}</option>`;
+    };
     const selectionKey = JSON.stringify([s.id, mode, match?.id, s.deployment.referenceId]);
     if (picker.dataset.mode !== mode) {
         picker.innerHTML = '<option value="manual">Manual inputs / no reference</option>'
-            + CATALOGUE.filter((entry) => entry.mode === mode).map(option).join("");
+            + CATALOGUE.filter((entry) => entry.mode === mode && matchReference({ ...entry, capacityModel: mode }) === entry).map(option).join("");
         picker.dataset.mode = mode;
     }
     if (picker.dataset.selectionKey !== selectionKey) {
@@ -211,18 +214,19 @@ function renderReference(s, r, mode) {
     const link = (url, label) => `<a class="doc-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`;
     const source = ref?.source ?? match?.source ?? (mode === "ptu" ? PTU_SOURCE : QUOTA_GUIDE);
     const headline = r.status === "unsupported" ? "Unsupported PTU sizing method"
-        : ref ? "Documented reference active" : match ? "Exact match available; not applied" : "Not available in catalogue for this identity";
-    const content = `<strong>${headline}</strong> · ${link(source, "Microsoft Learn source")} · Catalogue ${CATALOGUE_VERSION}, verified ${CATALOGUE_VERIFIED}. ${
+        : ref ? `${ref.kind} (active)` : match ? `${match.provenance} available; not applied` : "Not available in catalogue for this identity";
+    const content = `<strong>${esc(headline)}</strong> · ${link(source, "Microsoft Learn source")} · Catalogue ${CATALOGUE_VERSION}, verified ${CATALOGUE_VERIFIED}. ${
         esc(mode === "quota" ? QUOTA_REFERENCE_NOTICE : "Published coefficients can change and do not guarantee deployment availability.")}`;
     if ($("reference-status").innerHTML !== content) $("reference-status").innerHTML = content;
     for (const [key, state] of Object.entries(r.provenance.fields)) {
         const input = $(`deployment-${key}`);
         const label = input.closest(".field").querySelector(".field-source");
         const value = ref?.values[key];
-        input.placeholder = state === "Documented reference" ? String(value) : "blank = not set";
+        const usingReference = value !== undefined && state === ref.kind;
+        input.placeholder = usingReference ? fmt(value, 6) : "blank = not set";
         label.hidden = state === "Not set";
-        label.textContent = state === "Documented reference" ? `${state}: ${fmt(value, 6)} (enter a value to override)`
-            : value !== undefined ? `${state} overrides documented ${fmt(value, 6)}` : state;
+        label.textContent = usingReference ? `${state}: ${fmt(value, 6)} (enter a value to override)`
+            : value !== undefined ? `${state} overrides the reference (${fmt(value, 6)})` : state;
     }
 }
 

@@ -38,14 +38,14 @@ export const PTU_LIMITATION = "GPT-6 and newer models use normalized-token sizin
 export const DEPLOYMENT_FIELDS = [
     { key: "capacityModel", type: "choice", label: "Capacity model", options: CAPACITY_MODELS, default: "quota" },
     { key: "provider", label: "Provider", type: "text", required: false, default: "",
-      help: "Free text, e.g. the cloud or API provider. Not used in calculations." },
+      help: "Free text. Azure OpenAI identifies records in the bundled reference catalogue." },
     { key: "modelName", label: "Model name", type: "text", required: false, default: "",
-      help: "Free text. Not used in calculations." },
+      help: "Free text. Enter the published model name to find a reference, or keep your own name for manual sizing." },
     { key: "modelVersion", label: "Model version", type: "text", default: "",
-      help: "Enter the exact version for catalogue matching. Leave blank for manual sizing." },
-    { key: "referenceId", label: "Documented reference", type: "text", default: "" },
+      help: "Enter the exact version for version-specific references. Some quota references are published without a version." },
+    { key: "referenceId", label: "Catalogue reference", type: "text", default: "" },
     { key: "deploymentType", label: "Deployment type", type: "text", required: false, default: "",
-      help: "Free text, e.g. shared, regional, global, provisioned. Not used in calculations." },
+      help: "Free text. Enter the published deployment type to find a deployment-specific reference." },
     { key: "allocatedTPM", label: "Allocated TPM", unit: "tokens/min", min: 0, required: false, default: null,
       help: "Tokens-per-minute quota assigned to this deployment." },
     { key: "allocatedRPM", label: "Allocated RPM", unit: "req/min", min: 0, required: false, default: null,
@@ -140,11 +140,11 @@ export function normalizeInputs(input = {}) {
             if (f.key === "referenceId" || (f.key === "modelVersion" && !v)) continue;
             deployment[f.key] = v === null || v === undefined ? "" : String(v).trim().slice(0, 200);
         } else {
-            const documented = entry?.values[f.key];
+            const referenceValue = entry?.values[f.key];
             const manual = parseNumber(rawD[f.key]) !== null;
-            const value = manual ? rawD[f.key] : documented;
+            const value = manual ? rawD[f.key] : referenceValue;
             deployment[f.key] = checkNumeric(f, value, issues, "deployment");
-            fieldSources[f.key] = manual ? "User-entered" : documented !== undefined ? "Documented reference" : "Not set";
+            fieldSources[f.key] = manual ? "User-entered" : referenceValue !== undefined ? entry.provenance : "Not set";
             if (PTU_FIELDS.includes(f) && value === undefined && !unsupported) {
                 issues.push({ field: `deployment.${f.key}`, severity: "warning", message: `${f.label} is not set.` });
             }
@@ -165,11 +165,11 @@ export function normalizeInputs(input = {}) {
             message: "Rate-limit tokens per request are lower than input + output tokens; providers usually count at least the tokens actually processed." });
     }
     if (unsupported) issues.push({ field: "deployment.modelName", severity: "warning", message: unsupported });
-    if (rawD.referenceId && !entry) issues.push({ field: "deployment.referenceId", severity: "warning", message: "Selected reference does not match the current identity and mode. No documented values were applied." });
+    if (rawD.referenceId && !entry) issues.push({ field: "deployment.referenceId", severity: "warning", message: "Selected reference is not the best match for the current identity and mode. No reference values were applied." });
     const provenance = {
         fields: fieldSources,
         reference: entry ? { id: entry.id, source: entry.source, version: CATALOGUE_VERSION, verified: CATALOGUE_VERIFIED,
-            supported: entry.supported, values: entry.values } : null,
+            supported: entry.supported, kind: entry.provenance, values: entry.values } : null,
         ...(model === "quota" ? { notice: QUOTA_REFERENCE_NOTICE } : {}),
     };
     if (model !== "quota") return { workload, deployment, issues, provenance, unsupported };
